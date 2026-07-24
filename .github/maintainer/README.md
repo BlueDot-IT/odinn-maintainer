@@ -7,6 +7,14 @@ snapshot, asks the configured Codex model for a conservative structured review,
 and upserts one sticky review comment. It does not execute pull-request code,
 merge, close, or modify the Odinn web app.
 
+Before model spend it applies deterministic policy gates for explicit opt-out
+labels, bot-authored items, and closed items. It reuses only a prior
+`keep_open` result for the same item source revision, using a hidden marker in
+the sticky comment as the durable cache key. Every pull request review also
+publishes or updates an `Odinn Maintainer` GitHub Check; `needs_human` is
+neutral and `close_candidate` is action-required, so neither decision performs
+an automatic GitHub mutation.
+
 ## Caller workflow
 
 The Odinn repository keeps only a thin event workflow and pins this action to

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { renderComment, resolveTarget, reviewWithOAuthModel, validateReview } from "../.github/maintainer/core.mjs";
+import { checkConclusion, evaluatePolicy, findReusableReview, REVIEW_MARKER, renderComment, resolveTarget, reviewCacheKey, reviewWithOAuthModel, validateReview } from "../.github/maintainer/core.mjs";
 
 test("resolves pull request and issue events", () => {
   assert.deepEqual(resolveTarget({ eventName: "pull_request_target", payload: { pull_request: { number: 12, title: "Fix" } } }), { kind: "pull_request", number: 12, title: "Fix" });
@@ -27,6 +27,27 @@ test("comment is sticky and identifies the reviewed source", () => {
   assert.match(body, /<!-- odinn-maintainer -->/);
   assert.match(body, /PR #42/);
   assert.match(body, /test-model/);
+  assert.match(body, new RegExp(`odinn-maintainer-review v=2 key=${reviewCacheKey({ kind: "pull_request", number: 42, sourceSha: "abc123" })}`));
+});
+
+test("policy gates deterministic skips before model spend", () => {
+  const base = { state: "open", labels: [], author: "alice", authorType: "User", authorAssociation: "CONTRIBUTOR" };
+  assert.deepEqual(evaluatePolicy({ ...base, labels: ["odinn:skip-maintainer"] }), { reviewable: false, reason: "explicit skip label" });
+  assert.deepEqual(evaluatePolicy({ ...base, author: "renovate[bot]", authorType: "Bot" }), { reviewable: false, reason: "bot-authored item" });
+  assert.deepEqual(evaluatePolicy({ ...base, state: "closed" }), { reviewable: false, reason: "closed item" });
+  assert.equal(evaluatePolicy({ ...base, state: "closed" }, { force: true }).reviewable, true);
+});
+
+test("keep-open review cache is exact-head and never reuses close decisions", () => {
+  const snapshot = { kind: "pull_request", number: 7, sourceSha: "abc123", comments: [] };
+  const body = `${REVIEW_MARKER}\n<!-- odinn-maintainer-review v=2 key=${reviewCacheKey(snapshot)} decision=keep_open -->`;
+  assert.deepEqual(findReusableReview({ ...snapshot, comments: [{ body }] }), { decision: "keep_open", key: reviewCacheKey(snapshot) });
+  assert.equal(findReusableReview({ ...snapshot, sourceSha: "def456", comments: [{ body }] }), null);
+  const closeBody = body.replace("decision=keep_open", "decision=close_candidate");
+  assert.equal(findReusableReview({ ...snapshot, comments: [{ body: closeBody }] }), null);
+  assert.equal(checkConclusion("keep_open"), "success");
+  assert.equal(checkConclusion("needs_human"), "neutral");
+  assert.equal(checkConclusion("close_candidate"), "action_required");
 });
 
 test("review uses Odinn OAuth refresh and the ChatGPT Codex Responses transport", async () => {

@@ -32,6 +32,12 @@ outputs:
   number:
     description: Reviewed issue or pull request number.
     value: ${{ steps.review.outputs.number }}
+  cached:
+    description: Whether a prior keep-open review was reused without model spend.
+    value: ${{ steps.review.outputs.cached }}
+  skipped:
+    description: Whether policy skipped the target before model spend.
+    value: ${{ steps.review.outputs.skipped }}
 runs:
   using: composite
   steps:

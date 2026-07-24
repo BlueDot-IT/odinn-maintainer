@@ -1,8 +1,12 @@
+import { createHash } from "node:crypto";
+
 export const MAX_BODY_CHARS = 12_000;
 export const MAX_COMMENTS = 20;
 export const MAX_FILES = 40;
 export const MAX_PATCH_CHARS = 3_000;
 export const REVIEW_MARKER = "<!-- odinn-maintainer -->";
+export const REVIEW_VERSION = "2";
+export const CHECK_NAME = "Odinn Maintainer";
 
 function text(value, limit = MAX_BODY_CHARS) {
   return String(value ?? "").slice(0, limit);
@@ -27,6 +31,21 @@ export function resolveTarget({ eventName, payload, manualNumber } = {}) {
   if (!Number.isInteger(number) || number <= 0) throw new Error("workflow_dispatch requires a positive issue or pull request number");
   const kind = payload?.inputs?.kind === "issue" ? "issue" : "pull_request";
   return { kind, number, title: "manual review" };
+}
+
+export function evaluatePolicy(snapshot, { force = false } = {}) {
+  const labels = new Set((snapshot.labels || []).map((label) => String(label).toLowerCase()));
+  if (["odinn:skip-maintainer", "odinn-maintainer:skip", "clawsweeper:skip"].some((label) => labels.has(label))) {
+    return { reviewable: false, reason: "explicit skip label" };
+  }
+  const author = String(snapshot.author || "");
+  if (String(snapshot.authorType || "").toLowerCase() === "bot" || String(snapshot.authorAssociation || "").toLowerCase() === "bot" || /\[bot\]$/u.test(author)) {
+    return { reviewable: false, reason: "bot-authored item" };
+  }
+  if (!force && String(snapshot.state).toLowerCase() !== "open") {
+    return { reviewable: false, reason: "closed item" };
+  }
+  return { reviewable: true, reason: "eligible" };
 }
 
 async function boundedResponse(response, maxBytes = 1_500_000) {
@@ -88,6 +107,14 @@ export class GitHubApi {
   async updateComment(id, body) {
     return this.request(`/repos/${this.repository}/issues/comments/${id}`, { method: "PATCH", body: { body } });
   }
+
+  async createCheckRun(body) {
+    return this.request(`/repos/${this.repository}/check-runs`, { method: "POST", body });
+  }
+
+  async updateCheckRun(id, body) {
+    return this.request(`/repos/${this.repository}/check-runs/${id}`, { method: "PATCH", body });
+  }
 }
 
 export async function buildSnapshot(api, target) {
@@ -120,6 +147,8 @@ export async function buildSnapshot(api, target) {
     state: text(issue.state, 30),
     draft: Boolean(pull?.draft),
     author: text(issue.user?.login, 120),
+    authorType: text(issue.user?.type, 40),
+    authorAssociation: text(issue.author_association, 40),
     labels: list(issue.labels, 30).map((label) => text(label.name, 80)),
     createdAt: text(issue.created_at, 80),
     updatedAt: text(issue.updated_at, 80),
@@ -128,12 +157,35 @@ export async function buildSnapshot(api, target) {
     sourceSha: text(sourceSha, 100),
     changedFiles: files,
     checks: list(rawChecks?.check_runs, 50).map((check) => ({
+      id: Number(check.id || 0),
       name: text(check.name, 160),
       status: text(check.status, 40),
       conclusion: text(check.conclusion, 40)
     })),
     comments
   };
+}
+
+export function reviewCacheKey(snapshot) {
+  return createHash("sha256")
+    .update(`${snapshot.kind}:${snapshot.number}:${snapshot.sourceSha}`)
+    .digest("hex")
+    .slice(0, 24);
+}
+
+export function findReusableReview(snapshot) {
+  const key = reviewCacheKey(snapshot);
+  for (const comment of [...(snapshot.comments || [])].reverse()) {
+    const match = /<!-- odinn-maintainer-review v=(\d+) key=([a-f0-9]+) decision=([a-z_]+) -->/u.exec(String(comment.body || ""));
+    if (match?.[1] === REVIEW_VERSION && match[2] === key && match[3] === "keep_open") {
+      return { decision: "keep_open", key };
+    }
+  }
+  return null;
+}
+
+export function checkConclusion(decision) {
+  return decision === "keep_open" ? "success" : decision === "needs_human" ? "neutral" : decision === "close_candidate" ? "action_required" : "skipped";
 }
 
 export function validateReview(value) {
@@ -314,6 +366,7 @@ export function renderComment(snapshot, review, { model } = {}) {
   const evidence = review.evidence.length ? review.evidence.map((item) => `- **${markdown(item.source)}:** ${markdown(item.detail)}`).join("\n") : "- No additional evidence returned.";
   return [
     REVIEW_MARKER,
+    `<!-- odinn-maintainer-review v=${REVIEW_VERSION} key=${reviewCacheKey(snapshot)} decision=${review.decision} -->`,
     `## Odinn Maintainer review: ${review.decision.replaceAll("_", " ")}`,
     "",
     `**Confidence:** ${review.confidence}  `,
