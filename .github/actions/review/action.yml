@@ -1,0 +1,49 @@
+name: Odinn Maintainer Review
+description: Run a bounded OAuth-backed ClawSweeper-style review for a GitHub PR or issue.
+inputs:
+  github-token:
+    description: GitHub token used to read the target and publish the sticky review comment.
+    required: true
+  oauth-json:
+    description: Odinn OAuth token record JSON. It is consumed in memory and never commented.
+    required: true
+  model:
+    description: ChatGPT Codex model to use.
+    default: gpt-5.5
+  number:
+    description: Optional issue or pull request number for manual dispatch.
+    default: ""
+  oauth-client-id:
+    description: OAuth client id.
+    default: app_EMoamEEZ73f0CkXaXp7hrann
+  originator:
+    description: Codex transport originator.
+    default: openclaw
+  client-version:
+    description: Codex transport client version.
+    default: "2026.6.11"
+outputs:
+  decision:
+    description: Conservative review decision.
+    value: ${{ steps.review.outputs.decision }}
+  confidence:
+    description: Review confidence.
+    value: ${{ steps.review.outputs.confidence }}
+  number:
+    description: Reviewed issue or pull request number.
+    value: ${{ steps.review.outputs.number }}
+runs:
+  using: composite
+  steps:
+    - id: review
+      name: Run bounded OAuth review
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+        ODINN_OPENAI_OAUTH_JSON: ${{ inputs.oauth-json }}
+        ODINN_MAINTAINER_MODEL: ${{ inputs.model }}
+        ODINN_MAINTAINER_NUMBER: ${{ inputs.number }}
+        ODINN_OPENAI_OAUTH_CLIENT_ID: ${{ inputs.oauth-client-id }}
+        ODINN_OPENAI_ORIGINATOR: ${{ inputs.originator }}
+        ODINN_OPENAI_CLIENT_VERSION: ${{ inputs.client-version }}
+      run: node "${{ github.action_path }}/../../maintainer/index.mjs"
