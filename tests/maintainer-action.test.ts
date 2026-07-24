@@ -18,6 +18,8 @@ test("review output is conservative and bounded", () => {
     recommendedNextStep: "Ask for clarification."
   });
   assert.throws(() => validateReview({ decision: "close", confidence: "high", evidence: [] }), /unsupported/);
+  assert.equal(validateReview({ decision: "Needs Human", confidence: "High confidence", evidence: [] }).decision, "needs_human");
+  assert.equal(validateReview({ decision: "keep open", confidence: 0.65, evidence: [] }).confidence, "medium");
 });
 
 test("comment is sticky and identifies the reviewed source", () => {

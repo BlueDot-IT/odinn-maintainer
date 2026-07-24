@@ -138,10 +138,12 @@ export async function buildSnapshot(api, target) {
 
 export function validateReview(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("maintainer model output must be an object");
-  const decision = text(value.decision, 40);
-  const confidence = text(value.confidence, 20);
+  const rawDecision = text(value.decision, 40).trim().toLowerCase().replace(/[ -]+/g, "_");
+  const rawConfidence = value.confidence;
+  const decision = rawDecision;
+  const confidence = normalizeConfidence(rawConfidence);
   if (!["keep_open", "needs_human", "close_candidate"].includes(decision)) throw new Error("maintainer decision is unsupported");
-  if (!["high", "medium", "low"].includes(confidence)) throw new Error("maintainer confidence is unsupported");
+  if (!confidence) throw new Error("maintainer confidence is unsupported");
   if (!Array.isArray(value.evidence) || value.evidence.length > 8) throw new Error("maintainer evidence must be a bounded array");
   return {
     decision,
@@ -151,6 +153,16 @@ export function validateReview(value) {
     evidence: value.evidence.map((item) => ({ source: text(item?.source, 160), detail: text(item?.detail, 700) })),
     recommendedNextStep: text(value.recommendedNextStep, 600)
   };
+}
+
+function normalizeConfidence(value) {
+  const normalized = text(value, 40).trim().toLowerCase();
+  if (["high", "high confidence"].includes(normalized) || normalized.startsWith("high ")) return "high";
+  if (["medium", "moderate", "medium confidence", "moderate confidence"].includes(normalized) || normalized.startsWith("medium ") || normalized.startsWith("moderate ")) return "medium";
+  if (["low", "low confidence"].includes(normalized) || normalized.startsWith("low ")) return "low";
+  const numeric = Number(value);
+  if (Number.isFinite(numeric)) return numeric >= 0.8 ? "high" : numeric >= 0.5 ? "medium" : numeric >= 0 ? "low" : "";
+  return "";
 }
 
 function parseJson(content) {
