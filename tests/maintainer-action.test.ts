@@ -141,6 +141,36 @@ test("event repository and pull request base must match the caller", () => {
   );
 });
 
+test("bot-authored items stay skipped except explicitly armed trusted repair pull requests", () => {
+  const bot = snapshot({
+    author: "github-actions[bot]",
+    authorType: "Bot"
+  });
+  assert.equal(evaluatePolicy(bot).reviewable, false);
+  const trustedRepair = {
+    ...bot,
+    labels: ["odinn:allow-merge"],
+    headRef: "odinn-maintainer/repair-71-83e4e07958fc"
+  };
+  assert.equal(evaluatePolicy(trustedRepair).reviewable, true);
+  assert.equal(
+    evaluatePolicy({ ...trustedRepair, author: "other-bot[bot]" }).reviewable,
+    false
+  );
+  assert.equal(
+    evaluatePolicy({ ...trustedRepair, headRepo: "attacker/Odinn" }).reviewable,
+    false
+  );
+  assert.equal(
+    evaluatePolicy({ ...trustedRepair, headRef: "feature/repair-71-83e4e07958fc" }).reviewable,
+    false
+  );
+  assert.equal(
+    evaluatePolicy({ ...trustedRepair, labels: [] }).reviewable,
+    false
+  );
+});
+
 test("review output has an exact schema and weak close recommendations fail closed", () => {
   const valid = review();
   assert.deepEqual(validateReview(valid), valid);

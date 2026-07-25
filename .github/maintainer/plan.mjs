@@ -45,7 +45,10 @@ async function main() {
   });
   let snapshot = await buildSnapshot(api, target);
   const model = process.env.ODINN_MAINTAINER_MODEL || "gpt-5.5";
-  const policy = evaluatePolicy(snapshot, { force: eventName === "workflow_dispatch" });
+  const policy = evaluatePolicy(snapshot, {
+    force: eventName === "workflow_dispatch",
+    trustedLogin: process.env.ODINN_MAINTAINER_BOT_LOGIN || "github-actions[bot]"
+  });
   let plan;
   if (!policy.reviewable) {
     plan = buildPlan({
@@ -88,7 +91,7 @@ async function main() {
         clientId: process.env.ODINN_OPENAI_OAUTH_CLIENT_ID || "app_EMoamEEZ73f0CkXaXp7hrann",
         baseUrl: process.env.ODINN_OPENAI_CODEX_BASE_URL || "https://chatgpt.com/backend-api/codex",
         originator: process.env.ODINN_OPENAI_ORIGINATOR || "odinn-maintainer",
-        clientVersion: process.env.ODINN_OPENAI_CLIENT_VERSION || "4.0.1"
+        clientVersion: process.env.ODINN_OPENAI_CLIENT_VERSION || "4.0.2"
       });
       plan = buildPlan({
         repository,
