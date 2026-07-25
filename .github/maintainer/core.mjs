@@ -142,12 +142,24 @@ export function validateEventRepository({ payload, repository, target }) {
   }
 }
 
-export function evaluatePolicy(snapshot, { force = false } = {}) {
+export function evaluatePolicy(snapshot, {
+  force = false,
+  trustedLogin = "github-actions[bot]"
+} = {}) {
   const labels = new Set((snapshot.labels || []).map((label) => String(label).toLowerCase()));
   if (["odinn:skip-maintainer", "odinn-maintainer:skip"].some((label) => labels.has(label))) {
     return { reviewable: false, reason: "explicit skip label" };
   }
-  if (isBot(snapshot.author, snapshot.authorType)) return { reviewable: false, reason: "bot-authored item" };
+  if (isBot(snapshot.author, snapshot.authorType)) {
+    const trustedRepairPull =
+      snapshot.kind === "pull_request" &&
+      String(snapshot.author || "").toLowerCase() === String(trustedLogin || "").toLowerCase() &&
+      String(snapshot.repo || "").toLowerCase() === String(snapshot.baseRepo || "").toLowerCase() &&
+      String(snapshot.repo || "").toLowerCase() === String(snapshot.headRepo || "").toLowerCase() &&
+      /^odinn-maintainer\/repair-\d+-[0-9a-f]{12}$/iu.test(String(snapshot.headRef || "")) &&
+      labels.has("odinn:allow-merge");
+    if (!trustedRepairPull) return { reviewable: false, reason: "bot-authored item" };
+  }
   if (!force && String(snapshot.state).toLowerCase() !== "open") {
     return { reviewable: false, reason: "closed item" };
   }
@@ -191,7 +203,7 @@ export class GitHubApi {
         accept: "application/vnd.github+json",
         ...(this.token ? { authorization: `Bearer ${this.token}` } : {}),
         "x-github-api-version": "2022-11-28",
-        "user-agent": "Odinn-Maintainer-GitHub-Action/4.0.1",
+        "user-agent": "Odinn-Maintainer-GitHub-Action/4.0.2",
         ...(body === undefined ? {} : { "content-type": "application/json" })
       },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
@@ -864,7 +876,7 @@ export async function reviewWithOAuthModel(snapshot, {
   clientId = "app_EMoamEEZ73f0CkXaXp7hrann",
   baseUrl = "https://chatgpt.com/backend-api/codex",
   originator = "odinn-maintainer",
-  clientVersion = "4.0.1",
+  clientVersion = "4.0.2",
   timeoutMs = 120_000,
   fetchImpl = fetch
 } = {}) {
