@@ -1,8 +1,8 @@
 name: Odinn Maintainer Review
-description: Run a bounded OAuth-backed ClawSweeper-style review for a GitHub PR or issue.
+description: Run a bounded OAuth-backed Odinn Maintainer review for a GitHub pull request or issue.
 inputs:
   github-token:
-    description: GitHub token used to read the target and publish the sticky review comment.
+    description: GitHub token used to read the target and publish the sticky review comment and named Check.
     required: true
   oauth-json:
     description: Odinn OAuth token record JSON. It is consumed in memory and never commented.
@@ -18,10 +18,13 @@ inputs:
     default: app_EMoamEEZ73f0CkXaXp7hrann
   originator:
     description: Codex transport originator.
-    default: openclaw
+    default: odinn-maintainer
   client-version:
     description: Codex transport client version.
-    default: "2026.6.11"
+    default: "3.0.0"
+  automation-login:
+    description: GitHub login trusted to own the sticky review comment.
+    default: github-actions[bot]
 outputs:
   decision:
     description: Conservative review decision.
@@ -38,6 +41,9 @@ outputs:
   skipped:
     description: Whether policy skipped the target before model spend.
     value: ${{ steps.review.outputs.skipped }}
+  stale:
+    description: Whether the item changed during review and blocked publication.
+    value: ${{ steps.review.outputs.stale }}
 runs:
   using: composite
   steps:
@@ -52,4 +58,5 @@ runs:
         ODINN_OPENAI_OAUTH_CLIENT_ID: ${{ inputs.oauth-client-id }}
         ODINN_OPENAI_ORIGINATOR: ${{ inputs.originator }}
         ODINN_OPENAI_CLIENT_VERSION: ${{ inputs.client-version }}
+        ODINN_MAINTAINER_BOT_LOGIN: ${{ inputs.automation-login }}
       run: node "${{ github.action_path }}/../../maintainer/index.mjs"

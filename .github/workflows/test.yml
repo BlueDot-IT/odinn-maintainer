@@ -17,4 +17,4 @@ jobs:
           node-version: "24"
       - run: node --check .github/maintainer/core.mjs
       - run: node --check .github/maintainer/index.mjs
-      - run: node --test tests/maintainer-action.test.ts
+      - run: npm test
