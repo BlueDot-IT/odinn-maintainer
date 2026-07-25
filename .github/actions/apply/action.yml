@@ -1,0 +1,80 @@
+name: Odinn Maintainer Apply
+description: Deterministically apply a downloaded bounded plan without receiving model credentials.
+inputs:
+  github-token:
+    description: Job-scoped GitHub token with only the enabled write permissions.
+    required: true
+  plan-path:
+    description: Path to the downloaded plan artifact.
+    required: true
+  automation-login:
+    description: GitHub login trusted to own the sticky review comment.
+    default: github-actions[bot]
+  allow-automation:
+    description: Global kill switch for every autonomous mutation.
+    default: "false"
+  allow-labels:
+    description: Permit deterministic maintainer label reconciliation.
+    default: "false"
+  allow-close:
+    description: Permit guarded close after an authorized exact command.
+    default: "false"
+  allow-merge:
+    description: Permit guarded same-repository squash merge after an authorized exact-head command.
+    default: "false"
+  allow-repair:
+    description: Permit a bounded docs/tests repair branch and pull request after an authorized exact command.
+    default: "false"
+outputs:
+  decision:
+    description: Final conservative review decision.
+    value: ${{ steps.apply.outputs.decision }}
+  confidence:
+    description: Review confidence.
+    value: ${{ steps.apply.outputs.confidence }}
+  number:
+    description: Reviewed issue or pull request number.
+    value: ${{ steps.apply.outputs.number }}
+  cached:
+    description: Whether a trusted cached result was reused.
+    value: ${{ steps.apply.outputs.cached }}
+  skipped:
+    description: Whether deterministic policy skipped the item.
+    value: ${{ steps.apply.outputs.skipped }}
+  stale:
+    description: Whether live revalidation blocked the plan.
+    value: ${{ steps.apply.outputs.stale }}
+  action:
+    description: Deterministic mutation applied, or none.
+    value: ${{ steps.apply.outputs.action }}
+  label:
+    description: Deterministic label reconciled, if enabled.
+    value: ${{ steps.apply.outputs.label }}
+  closed:
+    description: Whether a guarded close was applied.
+    value: ${{ steps.apply.outputs.closed }}
+  merged:
+    description: Whether a guarded squash merge was applied.
+    value: ${{ steps.apply.outputs.merged }}
+  repair-pull-request:
+    description: URL of the repair pull request, if created or reconciled.
+    value: ${{ steps.apply.outputs.repair-pull-request }}
+  repair-branch:
+    description: Internal repair branch, if created or reconciled.
+    value: ${{ steps.apply.outputs.repair-branch }}
+runs:
+  using: composite
+  steps:
+    - id: apply
+      name: Apply bounded plan
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+        ODINN_MAINTAINER_PLAN_PATH: ${{ inputs.plan-path }}
+        ODINN_MAINTAINER_BOT_LOGIN: ${{ inputs.automation-login }}
+        ODINN_MAINTAINER_ALLOW_AUTOMATION: ${{ inputs.allow-automation }}
+        ODINN_MAINTAINER_ALLOW_LABELS: ${{ inputs.allow-labels }}
+        ODINN_MAINTAINER_ALLOW_CLOSE: ${{ inputs.allow-close }}
+        ODINN_MAINTAINER_ALLOW_MERGE: ${{ inputs.allow-merge }}
+        ODINN_MAINTAINER_ALLOW_REPAIR: ${{ inputs.allow-repair }}
+      run: node "${{ github.action_path }}/../../maintainer/apply.mjs"

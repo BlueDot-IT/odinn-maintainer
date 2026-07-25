@@ -36,6 +36,12 @@ function snapshot(overrides: Record<string, unknown> = {}) {
     labels: ["enhancement"],
     baseSha,
     sourceSha: headSha,
+    baseRepo: "jason-allen-oneal/Odinn",
+    headRepo: "jason-allen-oneal/Odinn",
+    baseRef: "main",
+    headRef: "feature",
+    mergeable: true,
+    mergeableState: "clean",
     changedFiles: [],
     checks: [],
     comments: [],
@@ -48,6 +54,26 @@ function snapshot(overrides: Record<string, unknown> = {}) {
       reviewComments: true,
       checks: true,
       promptTruncated: false
+    },
+    ...overrides
+  };
+}
+
+function review(overrides: Record<string, unknown> = {}) {
+  return {
+    decision: "needs_human",
+    confidence: "medium",
+    summary: "Needs a maintainer.",
+    reason: "The evidence is incomplete.",
+    evidence: [{ source: "body", detail: "The request needs context." }],
+    recommendedNextStep: "Ask for clarification.",
+    closeReason: "none",
+    relatedNumber: 0,
+    repair: {
+      requested: false,
+      title: "",
+      body: "",
+      changes: []
     },
     ...overrides
   };
@@ -116,26 +142,35 @@ test("event repository and pull request base must match the caller", () => {
 });
 
 test("review output has an exact schema and weak close recommendations fail closed", () => {
-  const valid = {
-    decision: "needs_human",
-    confidence: "medium",
-    summary: "Needs a maintainer.",
-    reason: "The evidence is incomplete.",
-    evidence: [{ source: "body", detail: "The request needs context." }],
-    recommendedNextStep: "Ask for clarification."
-  };
+  const valid = review();
   assert.deepEqual(validateReview(valid), valid);
   assert.equal(
-    validateReview({ ...valid, decision: "close_candidate", confidence: "medium" }).decision,
+    validateReview({
+      ...valid,
+      decision: "close_candidate",
+      confidence: "medium",
+      closeReason: "invalid"
+    }).decision,
     "needs_human"
   );
   assert.equal(
-    validateReview({ ...valid, decision: "close_candidate", confidence: "high", evidence: [] })
+    validateReview({
+      ...valid,
+      decision: "close_candidate",
+      confidence: "high",
+      evidence: [],
+      closeReason: "invalid"
+    })
       .decision,
     "needs_human"
   );
   assert.equal(
-    validateReview({ ...valid, decision: "close_candidate", confidence: "high" }).decision,
+    validateReview({
+      ...valid,
+      decision: "close_candidate",
+      confidence: "high",
+      closeReason: "invalid"
+    }).decision,
     "close_candidate"
   );
   assert.throws(() => validateReview({ ...valid, extra: true }), /exactly/);
@@ -371,7 +406,7 @@ test("OAuth refresh uses the fixed ChatGPT Codex Responses transport and strict 
     assert.equal(request.text.format.strict, true);
     return new Response(
       [
-        'data: {"type":"response.output_text.delta","delta":"{\\"decision\\":\\"needs_human\\",\\"confidence\\":\\"medium\\",\\"summary\\":\\"Needs review.\\",\\"reason\\":\\"Evidence is incomplete.\\",\\"evidence\\":[],\\"recommendedNextStep\\":\\"Ask a maintainer.\\"}"}\n\n',
+        'data: {"type":"response.output_text.delta","delta":"{\\"decision\\":\\"needs_human\\",\\"confidence\\":\\"medium\\",\\"summary\\":\\"Needs review.\\",\\"reason\\":\\"Evidence is incomplete.\\",\\"evidence\\":[],\\"recommendedNextStep\\":\\"Ask a maintainer.\\",\\"closeReason\\":\\"none\\",\\"relatedNumber\\":0,\\"repair\\":{\\"requested\\":false,\\"title\\":\\"\\",\\"body\\":\\"\\",\\"changes\\":[]}}"}\n\n',
         'data: {"type":"response.completed","response":{"id":"resp_test"}}\n\n'
       ].join(""),
       { status: 200, headers: { "content-type": "text/event-stream" } }
@@ -428,11 +463,13 @@ test("OAuth and model failures never include credential or response-body canarie
   );
 });
 
-test("GitHub write surface contains only sticky comments and check runs", () => {
+test("GitHub write surface is bounded and never dispatches or executes target code", () => {
   const source = readFileSync(".github/maintainer/core.mjs", "utf8");
   assert.match(source, /createComment/);
   assert.match(source, /createCheckRun/);
-  assert.doesNotMatch(source, /\/labels|\/merges|\/git\/refs|\/dispatches|state:\s*"closed"/u);
+  assert.match(source, /createGitRef/);
+  assert.match(source, /mergePull/);
+  assert.doesNotMatch(source, /\/dispatches|child_process|execFile|spawn\(/u);
 });
 
 test("active project files use only the Odinn Maintainer identity", () => {
@@ -442,9 +479,14 @@ test("active project files use only the Odinn Maintainer identity", () => {
   ];
   const files = [
     ".github/actions/review/action.yml",
+    ".github/actions/plan/action.yml",
+    ".github/actions/apply/action.yml",
     ".github/maintainer/README.md",
     ".github/maintainer/core.mjs",
+    ".github/maintainer/automation.mjs",
     ".github/maintainer/index.mjs",
+    ".github/maintainer/plan.mjs",
+    ".github/maintainer/apply.mjs",
     "tests/maintainer-action.test.ts"
   ];
   for (const file of files) {

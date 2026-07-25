@@ -21,7 +21,7 @@ inputs:
     default: odinn-maintainer
   client-version:
     description: Codex transport client version.
-    default: "3.0.0"
+    default: "4.0.0"
   automation-login:
     description: GitHub login trusted to own the sticky review comment.
     default: github-actions[bot]

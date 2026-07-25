@@ -1,0 +1,55 @@
+name: Odinn Maintainer Plan
+description: Create a bounded OAuth-backed plan without receiving a write-capable GitHub token.
+inputs:
+  github-read-token:
+    description: Optional GitHub token restricted to read permissions. Public repositories may leave this empty.
+    default: ""
+  oauth-json:
+    description: Odinn OAuth token record JSON, consumed only by the planning process.
+    required: true
+  model:
+    description: ChatGPT Codex model to use.
+    default: gpt-5.5
+  number:
+    description: Optional issue or pull request number for manual dispatch.
+    default: ""
+  oauth-client-id:
+    description: OAuth client id.
+    default: app_EMoamEEZ73f0CkXaXp7hrann
+  originator:
+    description: Codex transport originator.
+    default: odinn-maintainer
+  client-version:
+    description: Codex transport client version.
+    default: "4.0.0"
+  automation-login:
+    description: GitHub login trusted to own the sticky review comment.
+    default: github-actions[bot]
+  allow-automation:
+    description: Global kill switch. Must be true before repair planning is offered.
+    default: "false"
+  allow-repair:
+    description: Permit bounded docs/tests repair planning when the global switch and item opt-in are also present.
+    default: "false"
+outputs:
+  plan-path:
+    description: Local path to the bounded plan file for artifact upload.
+    value: ${{ steps.plan.outputs.plan-path }}
+runs:
+  using: composite
+  steps:
+    - id: plan
+      name: Create bounded plan
+      shell: bash
+      env:
+        GITHUB_READ_TOKEN: ${{ inputs.github-read-token }}
+        ODINN_OPENAI_OAUTH_JSON: ${{ inputs.oauth-json }}
+        ODINN_MAINTAINER_MODEL: ${{ inputs.model }}
+        ODINN_MAINTAINER_NUMBER: ${{ inputs.number }}
+        ODINN_OPENAI_OAUTH_CLIENT_ID: ${{ inputs.oauth-client-id }}
+        ODINN_OPENAI_ORIGINATOR: ${{ inputs.originator }}
+        ODINN_OPENAI_CLIENT_VERSION: ${{ inputs.client-version }}
+        ODINN_MAINTAINER_BOT_LOGIN: ${{ inputs.automation-login }}
+        ODINN_MAINTAINER_ALLOW_AUTOMATION: ${{ inputs.allow-automation }}
+        ODINN_MAINTAINER_ALLOW_REPAIR: ${{ inputs.allow-repair }}
+      run: node "${{ github.action_path }}/../../maintainer/plan.mjs"
