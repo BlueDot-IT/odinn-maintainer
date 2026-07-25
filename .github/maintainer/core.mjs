@@ -203,7 +203,7 @@ export class GitHubApi {
         accept: "application/vnd.github+json",
         ...(this.token ? { authorization: `Bearer ${this.token}` } : {}),
         "x-github-api-version": "2022-11-28",
-        "user-agent": "Odinn-Maintainer-GitHub-Action/4.0.2",
+        "user-agent": "Odinn-Maintainer-GitHub-Action/4.0.3",
         ...(body === undefined ? {} : { "content-type": "application/json" })
       },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
@@ -656,8 +656,6 @@ export function validateReview(value, { repairCandidates = [], requireOfferedRep
     if (closeReason === "duplicate" && relatedNumber <= 0) {
       throw new Error("duplicate close_candidate requires relatedNumber");
     }
-  } else if (closeReason !== "none" || relatedNumber !== 0) {
-    throw new Error("non-close review must not request closure metadata");
   }
   if (!value.repair || typeof value.repair !== "object" || Array.isArray(value.repair)) {
     throw new Error("repair must be an object");
@@ -876,7 +874,7 @@ export async function reviewWithOAuthModel(snapshot, {
   clientId = "app_EMoamEEZ73f0CkXaXp7hrann",
   baseUrl = "https://chatgpt.com/backend-api/codex",
   originator = "odinn-maintainer",
-  clientVersion = "4.0.2",
+  clientVersion = "4.0.3",
   timeoutMs = 120_000,
   fetchImpl = fetch
 } = {}) {
@@ -913,6 +911,7 @@ export async function reviewWithOAuthModel(snapshot, {
           "Return JSON matching the supplied schema only.",
           "Never propose secrets, credential handling, workflow changes, arbitrary code execution, or shell commands.",
           "Closure, merge, labels, and repair are only recommendations; a separate deterministic policy decides whether to apply them.",
+          "When decision is not close_candidate, set closeReason to none and relatedNumber to 0.",
           snapshot.complete
             ? "Use close_candidate only when high-confidence evidence strongly supports it."
             : "The snapshot is incomplete. You must choose needs_human."
