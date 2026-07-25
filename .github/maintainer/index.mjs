@@ -146,7 +146,7 @@ async function main() {
       clientId: process.env.ODINN_OPENAI_OAUTH_CLIENT_ID || "app_EMoamEEZ73f0CkXaXp7hrann",
       baseUrl: process.env.ODINN_OPENAI_CODEX_BASE_URL || "https://chatgpt.com/backend-api/codex",
       originator: process.env.ODINN_OPENAI_ORIGINATOR || "odinn-maintainer",
-      clientVersion: process.env.ODINN_OPENAI_CLIENT_VERSION || "3.0.0"
+      clientVersion: process.env.ODINN_OPENAI_CLIENT_VERSION || "4.0.0"
     });
   } catch (error) {
     await publishCheck(api, snapshot, {

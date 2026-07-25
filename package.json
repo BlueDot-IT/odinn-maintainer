@@ -1,11 +1,11 @@
 {
   "name": "odinn-maintainer",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": true,
   "type": "module",
   "scripts": {
-    "check": "node --check .github/maintainer/core.mjs && node --check .github/maintainer/index.mjs && node --test tests/maintainer-action.test.ts",
-    "test": "node --test tests/maintainer-action.test.ts"
+    "check": "node --check .github/maintainer/core.mjs && node --check .github/maintainer/automation.mjs && node --check .github/maintainer/index.mjs && node --check .github/maintainer/plan.mjs && node --check .github/maintainer/apply.mjs && node --test tests/*.test.ts",
+    "test": "node --test tests/*.test.ts"
   },
   "engines": {
     "node": ">=24"
