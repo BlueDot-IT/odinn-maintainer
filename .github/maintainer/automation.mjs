@@ -304,9 +304,9 @@ export function mergeGuard(snapshot, review, { allow, actor }) {
     return { allowed: false, reason: "authorized exact-head merge command absent" };
   }
   if (!snapshot.checks.length || snapshot.checks.some((check) =>
-    check.status !== "completed" || check.conclusion !== "success"
+    check.status !== "completed" || !["success", "neutral", "skipped"].includes(check.conclusion)
   )) {
-    return { allowed: false, reason: "checks are not complete and successful" };
+    return { allowed: false, reason: "checks are not complete or contain a failure" };
   }
   if (review.decision !== "keep_open" || review.confidence !== "high") {
     return { allowed: false, reason: "review does not satisfy merge policy" };

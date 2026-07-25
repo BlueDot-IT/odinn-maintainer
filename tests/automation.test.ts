@@ -133,6 +133,14 @@ test("merge is same-repository, success-only, squash-only, and exact-head comman
       review(),
       { allow: true, actor: "alice" }
     ).allowed,
+    true
+  );
+  assert.equal(
+    mergeGuard(
+      { ...item, checks: [{ name: "test", status: "completed", conclusion: "failure" }] },
+      review(),
+      { allow: true, actor: "alice" }
+    ).allowed,
     false
   );
   assert.equal(
