@@ -191,7 +191,7 @@ export class GitHubApi {
         accept: "application/vnd.github+json",
         ...(this.token ? { authorization: `Bearer ${this.token}` } : {}),
         "x-github-api-version": "2022-11-28",
-        "user-agent": "Odinn-Maintainer-GitHub-Action/4.0",
+        "user-agent": "Odinn-Maintainer-GitHub-Action/4.0.1",
         ...(body === undefined ? {} : { "content-type": "application/json" })
       },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
@@ -864,7 +864,7 @@ export async function reviewWithOAuthModel(snapshot, {
   clientId = "app_EMoamEEZ73f0CkXaXp7hrann",
   baseUrl = "https://chatgpt.com/backend-api/codex",
   originator = "odinn-maintainer",
-  clientVersion = "4.0.0",
+  clientVersion = "4.0.1",
   timeoutMs = 120_000,
   fetchImpl = fetch
 } = {}) {
