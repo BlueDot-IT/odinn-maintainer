@@ -203,6 +203,25 @@ test("review output has an exact schema and weak close recommendations fail clos
     }).decision,
     "close_candidate"
   );
+  assert.deepEqual(
+    {
+      closeReason: validateReview({
+        ...valid,
+        decision: "keep_open",
+        confidence: "high",
+        closeReason: "resolved",
+        relatedNumber: 42
+      }).closeReason,
+      relatedNumber: validateReview({
+        ...valid,
+        decision: "keep_open",
+        confidence: "high",
+        closeReason: "resolved",
+        relatedNumber: 42
+      }).relatedNumber
+    },
+    { closeReason: "none", relatedNumber: 0 }
+  );
   assert.throws(() => validateReview({ ...valid, extra: true }), /exactly/);
   assert.throws(
     () => validateReview({ ...valid, evidence: [{ source: "body", detail: "x", extra: "no" }] }),
