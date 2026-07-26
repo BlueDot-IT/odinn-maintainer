@@ -13,6 +13,9 @@ inputs:
   number:
     description: Optional issue or pull request number for manual dispatch.
     default: ""
+  kind:
+    description: Target kind when number is supplied by discovery.
+    default: pull_request
   oauth-client-id:
     description: OAuth client id.
     default: app_EMoamEEZ73f0CkXaXp7hrann
@@ -46,6 +49,7 @@ runs:
         ODINN_OPENAI_OAUTH_JSON: ${{ inputs.oauth-json }}
         ODINN_MAINTAINER_MODEL: ${{ inputs.model }}
         ODINN_MAINTAINER_NUMBER: ${{ inputs.number }}
+        ODINN_MAINTAINER_KIND: ${{ inputs.kind }}
         ODINN_OPENAI_OAUTH_CLIENT_ID: ${{ inputs.oauth-client-id }}
         ODINN_OPENAI_ORIGINATOR: ${{ inputs.originator }}
         ODINN_OPENAI_CLIENT_VERSION: ${{ inputs.client-version }}

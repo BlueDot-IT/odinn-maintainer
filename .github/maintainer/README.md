@@ -1,11 +1,13 @@
 # Odinn Maintainer GitHub Action
 
 This repository owns the separate, reusable GitHub Action used by Odinn. It is
-a GitHub-native Odinn Maintainer review lane: the caller repository reacts to
-pull requests and issues, while this repository collects a bounded snapshot,
-asks the configured Codex model for a conservative structured review, and
-upserts one sticky review comment. It never checks out or executes target
-repository code.
+a GitHub-native Odinn Maintainer control plane. The caller repository reacts to
+pull requests, issues, completed CI workflows, commands, and a scheduled
+reconciliation sweep. This repository discovers a bounded work queue, collects
+each target snapshot, asks the configured Codex model for a conservative
+structured review, and persists the current decision in one sticky review
+comment and one named Check. It never checks out or executes target repository
+code.
 
 Before model spend it applies deterministic policy gates for explicit opt-out
 labels, bot-authored items, and closed items. It reuses only a recent
@@ -16,8 +18,35 @@ always requires human review and is never cached.
 
 Every pull request review publishes or updates an `Odinn Maintainer` GitHub
 Check. The action re-fetches the complete context before publishing model
-output; any drift blocks the sticky comment and produces a neutral result.
+output. Human-authored or source drift blocks the sticky comment and produces a
+neutral result. Volatile check/mergeability drift may update the sticky
+decision but can never authorize a mutation; completed-workflow and scheduled
+reconciliation then produce a fresh decision from current state.
 `needs_human` is neutral and `close_candidate` is action-required.
+
+## Reconciliation and durable state
+
+The `targets` action turns direct events into a one-item queue, maps completed
+workflow runs back to their pull requests, and discovers up to 50 recently
+updated open pull requests and issues during a scheduled sweep. Caller workflow
+concurrency serializes each target. A failed or interrupted run therefore
+recovers on the next GitHub event or sweep without a private database.
+
+The bot-owned sticky comment is the durable, repository-visible state record.
+It contains the decision, evidence, live check summary, last reconciliation
+time, immutable review cache marker, and command help. The named Check links
+the decision to the exact head SHA. GitHub Actions runs, summaries, and
+artifacts provide the bounded queue history and audit trail.
+
+Supported commands from an owner, member, or collaborator are:
+
+- `/odinn-maintainer review` and `/odinn-maintainer status` to request a fresh
+  reconciliation.
+- `/odinn-maintainer repair` to request a guarded source/docs/tests repair PR.
+- `/odinn-maintainer merge HEAD_SHA` for a guarded one-time merge.
+- `/odinn-maintainer automerge HEAD_SHA` to retain merge intent while later
+  reconciliations wait for the gates.
+- `/odinn-maintainer close` for a guarded close.
 
 ## Guarded automation
 
@@ -45,12 +74,14 @@ Additional item-level gates are mandatory:
   non-draft pull requests with strict branch protection and successful live
   required checks can be squash-merged.
 - Repair requires `odinn:allow-repair` and
-  `/odinn-maintainer repair`. Phase one can modify only bounded UTF-8 files
-  under `docs/`, `test/`, or `tests/`; workflow, policy, authentication,
-  security, scripts, manifests, lock, hidden forge, and Odinn state paths are
+  `/odinn-maintainer repair`. It can modify only bounded UTF-8 files under
+  checked-in `apps/`, `adapters/`, `packages/`, `src/`, `docs/`, `test/`, or
+  `tests/`; workflow, policy, authentication, credentials, security, scripts,
+  manifests, lock, hidden forge, and Odinn state paths are
   denied. Repairs use GitHub's Git Data API to create an internal branch and
-  pull request. They never run a checkout, shell command, package script, or
-  repository test.
+  pull request. They never execute untrusted pull-request code in the
+  privileged workflow; the repair PR runs ordinary unprivileged CI and is
+  re-reviewed after CI completes.
 - Label reconciliation uses only the fixed `odinn:reviewed`,
   `odinn:needs-human`, and `odinn:close-candidate` labels.
 
@@ -61,8 +92,10 @@ pull request is reconciled on retry.
 
 ## Caller workflow
 
-The Odinn repository keeps only a thin event workflow and pins this action to
-an immutable commit:
+The Odinn repository keeps only a thin discovery/matrix workflow and pins these
+actions to an immutable commit. Its event surface should include direct
+pull-request/issue events, `issue_comment`, completed `workflow_run` events,
+manual dispatch, and a periodic `schedule`.
 
 ```yaml
 - uses: jason-allen-oneal/odinn-maintainer/.github/actions/review@COMMIT_SHA

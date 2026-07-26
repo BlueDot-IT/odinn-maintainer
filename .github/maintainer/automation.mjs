@@ -4,11 +4,12 @@ import {
   MAX_REPAIR_FILE_BYTES,
   MAX_REPAIR_TOTAL_BYTES,
   snapshotDigest,
+  stableSnapshotDigest,
   validateRepositoryPath,
   validateReview
 } from "./core.mjs";
 
-export const PLAN_VERSION = 1;
+export const PLAN_VERSION = 2;
 export const PLAN_TTL_MS = 15 * 60 * 1_000;
 export const DECISION_LABELS = Object.freeze({
   keep_open: {
@@ -37,6 +38,7 @@ const PLAN_KEYS = [
   "repository",
   "target",
   "snapshotDigest",
+  "stableSnapshotDigest",
   "sourceSha",
   "model",
   "createdAt",
@@ -76,7 +78,7 @@ function authorizedCommand(snapshot, action, actor) {
     const body = String(comment.body || "").trim();
     if (action === "close" && /^\/odinn-maintainer close$/iu.test(body)) return comment;
     if (action === "repair" && /^\/odinn-maintainer repair$/iu.test(body)) return comment;
-    const merge = /^\/odinn-maintainer merge ([0-9a-f]{40})$/iu.exec(body);
+    const merge = /^\/odinn-maintainer (?:merge|automerge) ([0-9a-f]{40})$/iu.exec(body);
     if (action === "merge" && merge?.[1]?.toLowerCase() === String(snapshot.sourceSha).toLowerCase()) {
       return comment;
     }
@@ -87,13 +89,13 @@ function authorizedCommand(snapshot, action, actor) {
 export function validateRepairPath(value) {
   const path = validateRepositoryPath(value);
   const lower = path.toLowerCase();
-  if (!/^(docs|test|tests)\//u.test(lower)) {
-    throw new Error("phase-one repair path is not in the checked-in docs/tests allowlist");
+  if (!/^(apps|adapters|packages|src|docs|test|tests)\//u.test(lower)) {
+    throw new Error("repair path is not in the checked-in source/docs/tests allowlist");
   }
   if (
     lower.startsWith(".forgejo/") ||
     lower.startsWith(".odinn/") ||
-    /(^|\/)(manifests?|locks?|scripts?|security|auth|policy)(\/|$)/u.test(lower) ||
+    /(^|\/)(manifests?|locks?|scripts?|security|auth|policy|credentials?|secrets?)(\/|$)/u.test(lower) ||
     /(^|\/)\.git[^/]*(\/|$)/u.test(lower)
   ) {
     throw new Error("repair path is denied by safety policy");
@@ -139,6 +141,7 @@ export function buildPlan({
     repository,
     target: { kind: snapshot.kind, number: snapshot.number },
     snapshotDigest: snapshotDigest(snapshot),
+    stableSnapshotDigest: stableSnapshotDigest(snapshot),
     sourceSha: snapshot.sourceSha,
     model,
     createdAt,
@@ -164,6 +167,8 @@ export function validatePlan(value, { now = Date.now() } = {}) {
   if (!Number.isInteger(value.target.number) || value.target.number <= 0) throw new Error("plan target number is invalid");
   const digest = boundedString(value.snapshotDigest, "plan digest", 64);
   if (!/^[0-9a-f]{64}$/u.test(digest)) throw new Error("plan digest is invalid");
+  const stableDigest = boundedString(value.stableSnapshotDigest, "plan stable digest", 64);
+  if (!/^[0-9a-f]{64}$/u.test(stableDigest)) throw new Error("plan stable digest is invalid");
   boundedString(value.sourceSha, "plan source", 100);
   boundedString(value.model, "plan model", 100);
   const created = Date.parse(value.createdAt);
@@ -213,6 +218,7 @@ export function validatePlan(value, { now = Date.now() } = {}) {
     ...value,
     repository,
     snapshotDigest: digest,
+    stableSnapshotDigest: stableDigest,
     review,
     repairBase
   };

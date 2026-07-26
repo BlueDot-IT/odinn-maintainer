@@ -201,11 +201,12 @@ test("merge is same-repository, success-only, squash-only, and exact-head comman
   );
 });
 
-test("repair is command-gated and restricted to the checked-in docs/tests allowlist", () => {
+test("repair is command-gated and restricted to checked-in source, docs, and tests", () => {
   assert.equal(validateRepairPath("docs/guide.md"), "docs/guide.md");
   assert.equal(validateRepairPath("tests/review.test.ts"), "tests/review.test.ts");
+  assert.equal(validateRepairPath("src/index.ts"), "src/index.ts");
+  assert.equal(validateRepairPath("packages/channels/src/index.ts"), "packages/channels/src/index.ts");
   for (const path of [
-    "src/index.ts",
     ".github/workflows/test.yml",
     "docs/security/policy.md",
     "tests/auth/token.test.ts",

@@ -35,7 +35,8 @@ async function main() {
   const target = resolveTarget({
     eventName,
     payload,
-    manualNumber: process.env.ODINN_MAINTAINER_NUMBER
+    manualNumber: process.env.ODINN_MAINTAINER_NUMBER,
+    manualKind: process.env.ODINN_MAINTAINER_KIND
   });
   validateEventRepository({ payload, repository, target });
   const api = new GitHubApi({

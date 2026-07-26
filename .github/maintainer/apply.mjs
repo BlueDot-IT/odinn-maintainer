@@ -8,6 +8,7 @@ import {
   renderComment,
   safeMarkdown,
   snapshotDigest,
+  stableSnapshotDigest,
   upsertComment
 } from "./core.mjs";
 import {
@@ -106,6 +107,10 @@ async function main() {
   const authorizedActor = automationEnabled ? await actorCanMutate(api, actor) : false;
   const live = await buildSnapshot(api, plan.target);
   if (snapshotDigest(live) !== plan.snapshotDigest || live.sourceSha !== plan.sourceSha) {
+    const onlyVolatileStateChanged =
+      live.sourceSha === plan.sourceSha &&
+      stableSnapshotDigest(live) === plan.stableSnapshotDigest;
+    if (!onlyVolatileStateChanged) {
     await publishCheck(api, live, {
       decision: "needs_human",
       summary: "The item changed after planning.",
@@ -118,6 +123,7 @@ async function main() {
       stale: true
     });
     return;
+    }
   }
   if (plan.mode === "skipped") {
     await publishCheck(api, live, {
