@@ -277,7 +277,7 @@ test("plans expire and repair apply rechecks the executor-derived default branch
     createdAt
   });
   assert.throws(
-    () => validatePlan(plan, { now: Date.parse(createdAt) + 16 * 60 * 1_000 }),
+    () => validatePlan(plan, { now: Date.parse(createdAt) + 61 * 60 * 1_000 }),
     /expired/
   );
   const api = {

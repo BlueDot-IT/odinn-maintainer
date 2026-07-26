@@ -58,7 +58,7 @@ Guarded mutations use two separate actions and two separate jobs:
 2. The caller uploads that plan as an artifact. A later job downloads it.
 3. `apply` receives the downloaded plan and the job-scoped write token. It
    rejects OAuth and API-key environment variables, validates the plan's
-   schema and 15-minute lifetime, then re-fetches the exact live item before
+   schema and 60-minute lifetime, then re-fetches the exact live item before
    any planned mutation.
 
 All autonomous switches default to `false`. `allow-automation` is the global

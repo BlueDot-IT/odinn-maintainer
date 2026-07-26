@@ -10,7 +10,7 @@ import {
 } from "./core.mjs";
 
 export const PLAN_VERSION = 2;
-export const PLAN_TTL_MS = 15 * 60 * 1_000;
+export const PLAN_TTL_MS = 60 * 60 * 1_000;
 export const DECISION_LABELS = Object.freeze({
   keep_open: {
     name: "odinn:reviewed",
