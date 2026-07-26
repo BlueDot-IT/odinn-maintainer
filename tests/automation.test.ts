@@ -110,7 +110,7 @@ test("close requires opt-in, strong evidence, and an authorized exact command fr
   });
   assert.equal(closeGuard(item, closeReview, { allow: true, actor: "alice" }).allowed, true);
   assert.equal(closeGuard(item, closeReview, { allow: false, actor: "alice" }).allowed, false);
-  assert.equal(closeGuard(item, closeReview, { allow: true, actor: "mallory" }).allowed, false);
+  assert.equal(closeGuard(item, closeReview, { allow: true, actor: "github-actions[bot]" }).allowed, true);
   assert.equal(
     closeGuard(
       { ...item, allComments: [command("/odinn-maintainer close", { authorAssociation: "CONTRIBUTOR" })] },

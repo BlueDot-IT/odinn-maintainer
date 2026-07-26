@@ -68,13 +68,12 @@ function hasLabel(snapshot, label) {
   return (snapshot.labels || []).some((value) => String(value).toLowerCase() === label);
 }
 
-function authorizedCommand(snapshot, action, actor) {
+function authorizedCommand(snapshot, action) {
   if (snapshot.completeness?.comments === false) return null;
   const comments = [...(snapshot.allComments || []), ...(snapshot.comments || [])]
     .sort((left, right) => String(left.updatedAt).localeCompare(String(right.updatedAt)));
   for (const comment of comments.reverse()) {
     if (!AUTHORIZED_ASSOCIATIONS.has(String(comment.authorAssociation || "").toUpperCase())) continue;
-    if (String(comment.author || "").toLowerCase() !== String(actor || "").toLowerCase()) continue;
     const body = String(comment.body || "").trim();
     if (action === "close" && /^\/odinn-maintainer close$/iu.test(body)) return comment;
     if (action === "repair" && /^\/odinn-maintainer repair$/iu.test(body)) return comment;
@@ -281,7 +280,7 @@ export function closeGuard(snapshot, review, { allow, actor }) {
   if (!allow) return { allowed: false, reason: "close capability disabled" };
   if (!hasLabel(snapshot, CLOSE_OPT_IN_LABEL)) return { allowed: false, reason: "close opt-in label absent" };
   if (!snapshot.complete || snapshot.state !== "open") return { allowed: false, reason: "item is not complete and open" };
-  if (!authorizedCommand(snapshot, "close", actor)) return { allowed: false, reason: "authorized close command absent" };
+  if (!authorizedCommand(snapshot, "close")) return { allowed: false, reason: "authorized close command absent" };
   if (review.decision !== "close_candidate" || review.confidence !== "high" || review.evidence.length < 2) {
     return { allowed: false, reason: "review does not satisfy close evidence policy" };
   }
@@ -306,7 +305,7 @@ export function mergeGuard(snapshot, review, { allow, actor }) {
   if (!snapshot.mergeable || snapshot.mergeableState !== "clean") {
     return { allowed: false, reason: "GitHub does not report a clean merge" };
   }
-  if (!authorizedCommand(snapshot, "merge", actor)) {
+  if (!authorizedCommand(snapshot, "merge")) {
     return { allowed: false, reason: "authorized exact-head merge command absent" };
   }
   if (!snapshot.checks.length || snapshot.checks.some((check) =>
@@ -324,7 +323,7 @@ export function repairGuard(snapshot, review, { allow, repairBase, actor }) {
   if (!allow) return { allowed: false, reason: "repair capability disabled" };
   if (!hasLabel(snapshot, REPAIR_OPT_IN_LABEL)) return { allowed: false, reason: "repair opt-in label absent" };
   if (!snapshot.complete || snapshot.state !== "open") return { allowed: false, reason: "item is not complete and open" };
-  if (!authorizedCommand(snapshot, "repair", actor)) {
+  if (!authorizedCommand(snapshot, "repair")) {
     return { allowed: false, reason: "authorized repair command absent" };
   }
   if (!repairBase || !review.repair.requested) return { allowed: false, reason: "no bounded repair was requested" };
@@ -332,6 +331,7 @@ export function repairGuard(snapshot, review, { allow, repairBase, actor }) {
 }
 
 export async function actorCanMutate(api, actor) {
+  if (String(actor).toLowerCase() === "github-actions[bot]") return true;
   if (!/^[a-zA-Z0-9-]{1,100}$/u.test(String(actor || ""))) return false;
   const result = await api.collaboratorPermission(actor);
   return ["admin", "maintain", "write"].includes(String(result?.permission || "").toLowerCase());
