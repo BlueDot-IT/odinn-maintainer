@@ -4,12 +4,13 @@ import {
   MAX_REPAIR_FILE_BYTES,
   MAX_REPAIR_TOTAL_BYTES,
   snapshotDigest,
+  stableSnapshotDigest,
   validateRepositoryPath,
   validateReview
 } from "./core.mjs";
 
-export const PLAN_VERSION = 1;
-export const PLAN_TTL_MS = 15 * 60 * 1_000;
+export const PLAN_VERSION = 2;
+export const PLAN_TTL_MS = 60 * 60 * 1_000;
 export const DECISION_LABELS = Object.freeze({
   keep_open: {
     name: "odinn:reviewed",
@@ -37,6 +38,7 @@ const PLAN_KEYS = [
   "repository",
   "target",
   "snapshotDigest",
+  "stableSnapshotDigest",
   "sourceSha",
   "model",
   "createdAt",
@@ -66,17 +68,16 @@ function hasLabel(snapshot, label) {
   return (snapshot.labels || []).some((value) => String(value).toLowerCase() === label);
 }
 
-function authorizedCommand(snapshot, action, actor) {
+function authorizedCommand(snapshot, action) {
   if (snapshot.completeness?.comments === false) return null;
   const comments = [...(snapshot.allComments || []), ...(snapshot.comments || [])]
     .sort((left, right) => String(left.updatedAt).localeCompare(String(right.updatedAt)));
   for (const comment of comments.reverse()) {
     if (!AUTHORIZED_ASSOCIATIONS.has(String(comment.authorAssociation || "").toUpperCase())) continue;
-    if (String(comment.author || "").toLowerCase() !== String(actor || "").toLowerCase()) continue;
     const body = String(comment.body || "").trim();
     if (action === "close" && /^\/odinn-maintainer close$/iu.test(body)) return comment;
     if (action === "repair" && /^\/odinn-maintainer repair$/iu.test(body)) return comment;
-    const merge = /^\/odinn-maintainer merge ([0-9a-f]{40})$/iu.exec(body);
+    const merge = /^\/odinn-maintainer (?:merge|automerge) ([0-9a-f]{40})$/iu.exec(body);
     if (action === "merge" && merge?.[1]?.toLowerCase() === String(snapshot.sourceSha).toLowerCase()) {
       return comment;
     }
@@ -87,13 +88,13 @@ function authorizedCommand(snapshot, action, actor) {
 export function validateRepairPath(value) {
   const path = validateRepositoryPath(value);
   const lower = path.toLowerCase();
-  if (!/^(docs|test|tests)\//u.test(lower)) {
-    throw new Error("phase-one repair path is not in the checked-in docs/tests allowlist");
+  if (!/^(apps|adapters|packages|src|docs|test|tests)\//u.test(lower)) {
+    throw new Error("repair path is not in the checked-in source/docs/tests allowlist");
   }
   if (
     lower.startsWith(".forgejo/") ||
     lower.startsWith(".odinn/") ||
-    /(^|\/)(manifests?|locks?|scripts?|security|auth|policy)(\/|$)/u.test(lower) ||
+    /(^|\/)(manifests?|locks?|scripts?|security|auth|policy|credentials?|secrets?)(\/|$)/u.test(lower) ||
     /(^|\/)\.git[^/]*(\/|$)/u.test(lower)
   ) {
     throw new Error("repair path is denied by safety policy");
@@ -139,6 +140,7 @@ export function buildPlan({
     repository,
     target: { kind: snapshot.kind, number: snapshot.number },
     snapshotDigest: snapshotDigest(snapshot),
+    stableSnapshotDigest: stableSnapshotDigest(snapshot),
     sourceSha: snapshot.sourceSha,
     model,
     createdAt,
@@ -164,6 +166,8 @@ export function validatePlan(value, { now = Date.now() } = {}) {
   if (!Number.isInteger(value.target.number) || value.target.number <= 0) throw new Error("plan target number is invalid");
   const digest = boundedString(value.snapshotDigest, "plan digest", 64);
   if (!/^[0-9a-f]{64}$/u.test(digest)) throw new Error("plan digest is invalid");
+  const stableDigest = boundedString(value.stableSnapshotDigest, "plan stable digest", 64);
+  if (!/^[0-9a-f]{64}$/u.test(stableDigest)) throw new Error("plan stable digest is invalid");
   boundedString(value.sourceSha, "plan source", 100);
   boundedString(value.model, "plan model", 100);
   const created = Date.parse(value.createdAt);
@@ -213,6 +217,7 @@ export function validatePlan(value, { now = Date.now() } = {}) {
     ...value,
     repository,
     snapshotDigest: digest,
+    stableSnapshotDigest: stableDigest,
     review,
     repairBase
   };
@@ -275,7 +280,7 @@ export function closeGuard(snapshot, review, { allow, actor }) {
   if (!allow) return { allowed: false, reason: "close capability disabled" };
   if (!hasLabel(snapshot, CLOSE_OPT_IN_LABEL)) return { allowed: false, reason: "close opt-in label absent" };
   if (!snapshot.complete || snapshot.state !== "open") return { allowed: false, reason: "item is not complete and open" };
-  if (!authorizedCommand(snapshot, "close", actor)) return { allowed: false, reason: "authorized close command absent" };
+  if (!authorizedCommand(snapshot, "close")) return { allowed: false, reason: "authorized close command absent" };
   if (review.decision !== "close_candidate" || review.confidence !== "high" || review.evidence.length < 2) {
     return { allowed: false, reason: "review does not satisfy close evidence policy" };
   }
@@ -300,7 +305,7 @@ export function mergeGuard(snapshot, review, { allow, actor }) {
   if (!snapshot.mergeable || snapshot.mergeableState !== "clean") {
     return { allowed: false, reason: "GitHub does not report a clean merge" };
   }
-  if (!authorizedCommand(snapshot, "merge", actor)) {
+  if (!authorizedCommand(snapshot, "merge")) {
     return { allowed: false, reason: "authorized exact-head merge command absent" };
   }
   if (!snapshot.checks.length || snapshot.checks.some((check) =>
@@ -318,7 +323,7 @@ export function repairGuard(snapshot, review, { allow, repairBase, actor }) {
   if (!allow) return { allowed: false, reason: "repair capability disabled" };
   if (!hasLabel(snapshot, REPAIR_OPT_IN_LABEL)) return { allowed: false, reason: "repair opt-in label absent" };
   if (!snapshot.complete || snapshot.state !== "open") return { allowed: false, reason: "item is not complete and open" };
-  if (!authorizedCommand(snapshot, "repair", actor)) {
+  if (!authorizedCommand(snapshot, "repair")) {
     return { allowed: false, reason: "authorized repair command absent" };
   }
   if (!repairBase || !review.repair.requested) return { allowed: false, reason: "no bounded repair was requested" };
@@ -326,6 +331,7 @@ export function repairGuard(snapshot, review, { allow, repairBase, actor }) {
 }
 
 export async function actorCanMutate(api, actor) {
+  if (String(actor).toLowerCase() === "github-actions[bot]") return true;
   if (!/^[a-zA-Z0-9-]{1,100}$/u.test(String(actor || ""))) return false;
   const result = await api.collaboratorPermission(actor);
   return ["admin", "maintain", "write"].includes(String(result?.permission || "").toLowerCase());

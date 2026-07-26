@@ -6,9 +6,9 @@ export const MAX_FILES = 40;
 export const MAX_PATCH_CHARS = 3_000;
 export const MAX_PAGES = 5;
 export const REVIEW_MARKER = "<!-- odinn-maintainer -->";
-export const REVIEW_VERSION = "4";
-export const POLICY_VERSION = "odinn-maintainer-policy-4";
-export const PROMPT_VERSION = "odinn-maintainer-prompt-4";
+export const REVIEW_VERSION = "5";
+export const POLICY_VERSION = "odinn-maintainer-policy-5";
+export const PROMPT_VERSION = "odinn-maintainer-prompt-5";
 export const CHECK_NAME = "Odinn Maintainer";
 export const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1_000;
 
@@ -107,7 +107,18 @@ function sha256(value) {
   return createHash("sha256").update(JSON.stringify(canonical(value))).digest("hex");
 }
 
-export function resolveTarget({ eventName, payload, manualNumber } = {}) {
+export function resolveTarget({ eventName, payload, manualNumber, manualKind } = {}) {
+  if (manualNumber) {
+    const number = Number(manualNumber);
+    if (!Number.isInteger(number) || number <= 0) {
+      throw new Error("the reconciled target number must be positive");
+    }
+    return {
+      kind: (manualKind || payload?.inputs?.kind) === "issue" ? "issue" : "pull_request",
+      number,
+      title: eventName === "workflow_dispatch" ? "manual review" : "reconciled review"
+    };
+  }
   if (["pull_request_target", "pull_request_review", "pull_request_review_comment"].includes(eventName)) {
     const item = payload?.pull_request;
     if (!item?.number) throw new Error(`${eventName} did not contain a pull request`);
@@ -122,7 +133,7 @@ export function resolveTarget({ eventName, payload, manualNumber } = {}) {
       title: text(item.title, 240)
     };
   }
-  const number = Number(manualNumber || payload?.inputs?.number || "");
+  const number = Number(payload?.inputs?.number || "");
   if (!Number.isInteger(number) || number <= 0) {
     throw new Error("workflow_dispatch requires a positive issue or pull request number");
   }
@@ -203,7 +214,7 @@ export class GitHubApi {
         accept: "application/vnd.github+json",
         ...(this.token ? { authorization: `Bearer ${this.token}` } : {}),
         "x-github-api-version": "2022-11-28",
-        "user-agent": "Odinn-Maintainer-GitHub-Action/4.0.3",
+        "user-agent": "Odinn-Maintainer-GitHub-Action/0.5.0",
         ...(body === undefined ? {} : { "content-type": "application/json" })
       },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
@@ -406,6 +417,18 @@ export class GitHubApi {
       `/repos/${this.repository}/pulls?state=open&head=${encodeURIComponent(`${owner}:${branch}`)}&per_page=10`
     );
   }
+
+  openPulls() {
+    return this.paginate(`/repos/${this.repository}/pulls?state=open&sort=updated&direction=desc&per_page=100`, {
+      maxItems: 100
+    });
+  }
+
+  openIssues() {
+    return this.paginate(`/repos/${this.repository}/issues?state=open&sort=updated&direction=desc&per_page=100`, {
+      maxItems: 100
+    });
+  }
 }
 
 function normalizedDiscussion(items, kind) {
@@ -580,6 +603,16 @@ function snapshotIdentity(snapshot) {
 
 export function snapshotDigest(snapshot) {
   return sha256(snapshotIdentity(snapshot));
+}
+
+export function stableSnapshotDigest(snapshot) {
+  const identity = snapshotIdentity(snapshot);
+  return sha256({
+    ...identity,
+    checks: [],
+    mergeable: false,
+    mergeableState: ""
+  });
 }
 
 export function reviewCacheKey(snapshot, { model = "configured-model" } = {}) {
@@ -1031,6 +1064,15 @@ export function renderComment(snapshot, review, { model, reviewedAt = new Date()
   const evidence = review.evidence.length
     ? review.evidence.map((item) => `- **${safeMarkdown(item.source, 160)}:** ${safeMarkdown(item.detail, 700)}`).join("\n")
     : "- No additional evidence returned.";
+  const checkCounts = (snapshot.checks || []).reduce((counts, check) => {
+    const key = check.status === "completed" ? (check.conclusion || "unknown") : check.status;
+    counts[key] = (counts[key] || 0) + 1;
+    return counts;
+  }, {});
+  const checkStatus = Object.entries(checkCounts)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([name, count]) => `${name}: ${count}`)
+    .join(", ") || "none reported";
   return [
     REVIEW_MARKER,
     `<!-- odinn-maintainer-review v=${REVIEW_VERSION} key=${reviewCacheKey(snapshot, { model })} decision=${review.decision} at=${reviewedAt} -->`,
@@ -1044,6 +1086,22 @@ export function renderComment(snapshot, review, { model, reviewedAt = new Date()
     evidence,
     "",
     `**Recommended next step:** ${safeMarkdown(review.recommendedNextStep, 600)}`,
+    "",
+    "### Live state",
+    `- Checks: ${safeMarkdown(checkStatus, 500)}`,
+    `- Complete bounded context: ${snapshot.complete ? "yes" : "no"}`,
+    `- Last reconciled: ${safeMarkdown(reviewedAt, 80)}`,
+    "",
+    "<details><summary>Commands</summary>",
+    "",
+    "- `/odinn-maintainer review` — request reconciliation",
+    "- `/odinn-maintainer status` — refresh this decision and live state",
+    "- `/odinn-maintainer repair` — create a guarded repair PR when opted in",
+    "- `/odinn-maintainer merge HEAD_SHA` — guarded one-time merge",
+    "- `/odinn-maintainer automerge HEAD_SHA` — merge after gates pass on a later reconciliation",
+    "- `/odinn-maintainer close` — guarded close when opted in",
+    "",
+    "</details>",
     "",
     `<sub>Review of ${snapshot.kind === "pull_request" ? "PR" : "issue"} #${snapshot.number} at ${safeMarkdown(snapshot.sourceSha, 100)}; model: ${safeMarkdown(model || "configured model", 100)}.</sub>`
   ].join("\n");

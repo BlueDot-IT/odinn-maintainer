@@ -1,0 +1,25 @@
+name: Odinn Maintainer Target Discovery
+description: Resolve event targets or discover bounded stale open work for reconciliation.
+inputs:
+  github-read-token:
+    description: GitHub token with pull-request and issue read permission.
+    required: true
+  include-issues:
+    description: Include open issues during scheduled reconciliation.
+    default: "true"
+outputs:
+  targets:
+    description: JSON matrix of target kind and number pairs.
+    value: ${{ steps.targets.outputs.targets }}
+  count:
+    description: Number of targets discovered.
+    value: ${{ steps.targets.outputs.count }}
+runs:
+  using: composite
+  steps:
+    - id: targets
+      shell: bash
+      env:
+        GITHUB_READ_TOKEN: ${{ inputs.github-read-token }}
+        ODINN_MAINTAINER_INCLUDE_ISSUES: ${{ inputs.include-issues }}
+      run: node "${{ github.action_path }}/../../maintainer/targets.mjs"
