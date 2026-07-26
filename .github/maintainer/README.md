@@ -98,7 +98,7 @@ pull-request/issue events, `issue_comment`, completed `workflow_run` events,
 manual dispatch, and a periodic `schedule`.
 
 ```yaml
-- uses: jason-allen-oneal/odinn-maintainer/.github/actions/review@COMMIT_SHA
+- uses: BlueDot-IT/odinn-maintainer/.github/actions/review@COMMIT_SHA
   with:
     github-token: ${{ secrets.GITHUB_TOKEN }}
     oauth-json: ${{ secrets.ODINN_OPENAI_OAUTH_JSON }}
@@ -117,7 +117,7 @@ jobs:
       checks: read
     steps:
       - id: plan
-        uses: jason-allen-oneal/odinn-maintainer/.github/actions/plan@COMMIT_SHA
+        uses: BlueDot-IT/odinn-maintainer/.github/actions/plan@COMMIT_SHA
         with:
           github-read-token: ${{ github.token }}
           oauth-json: ${{ secrets.ODINN_OPENAI_OAUTH_JSON }}
@@ -141,7 +141,7 @@ jobs:
         with:
           name: odinn-maintainer-plan
           path: .odinn-maintainer-plan
-      - uses: jason-allen-oneal/odinn-maintainer/.github/actions/apply@COMMIT_SHA
+      - uses: BlueDot-IT/odinn-maintainer/.github/actions/apply@COMMIT_SHA
         with:
           github-token: ${{ github.token }}
           plan-path: .odinn-maintainer-plan/plan.json
