@@ -18,6 +18,7 @@ import {
   actorCanMutate,
   capabilityAllowed,
   closeGuard,
+  consumeOneShotAuthorization,
   enabled,
   mergeGuard,
   repairGuard,
@@ -181,7 +182,8 @@ async function main() {
           capability: enabled(process.env.ODINN_MAINTAINER_ALLOW_CLOSE),
           actorAuthorized: authorizedActor
         }),
-        actor
+        actor,
+        authorization: plan.oneShotAuthorization
       })
     },
     {
@@ -204,7 +206,8 @@ async function main() {
           actorAuthorized: authorizedActor
         }),
         repairBase: plan.repairBase,
-        actor
+        actor,
+        authorization: plan.oneShotAuthorization
       })
     }
   ].filter((entry) => entry.guard.allowed);
@@ -215,6 +218,14 @@ async function main() {
   let merged = false;
   let repairPullRequest = "";
   let repairBranch = "";
+  if (["close", "repair"].includes(guards[0]?.action)) {
+    await consumeOneShotAuthorization(api, plan.oneShotAuthorization, {
+      actor,
+      trustedLogin: process.env.ODINN_MAINTAINER_BOT_LOGIN || "github-actions[bot]",
+      runId: process.env.GITHUB_RUN_ID,
+      runAttempt: Number(process.env.GITHUB_RUN_ATTEMPT || 1)
+    });
+  }
   if (guards[0]?.action === "close") {
     await applyClose(api, live, review);
     action = "close";

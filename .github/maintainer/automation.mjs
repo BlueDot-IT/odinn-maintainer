@@ -9,8 +9,11 @@ import {
   validateReview
 } from "./core.mjs";
 
-export const PLAN_VERSION = 2;
+export const PLAN_VERSION = 3;
 export const PLAN_TTL_MS = 60 * 60 * 1_000;
+export const ONE_SHOT_COMMAND_TTL_MS = PLAN_TTL_MS;
+const ONE_SHOT_RECEIPT_VERSION = 1;
+const ONE_SHOT_RECEIPT_MARKER = "odinn-maintainer-one-shot-consumed";
 export const DECISION_LABELS = Object.freeze({
   keep_open: {
     name: "odinn:reviewed",
@@ -46,7 +49,8 @@ const PLAN_KEYS = [
   "decision",
   "confidence",
   "review",
-  "repairBase"
+  "repairBase",
+  "oneShotAuthorization"
 ];
 
 function exactKeys(value, expected, label) {
@@ -83,6 +87,316 @@ function authorizedCommand(snapshot, action) {
     }
   }
   return null;
+}
+
+function oneShotAuthorizationDigest(value) {
+  return createHash("sha256")
+    .update(JSON.stringify({
+      action: value.action,
+      commentId: value.commentId,
+      author: value.author,
+      association: value.association,
+      body: value.body,
+      createdAt: value.createdAt,
+      updatedAt: value.updatedAt,
+      target: value.target,
+      sourceSha: value.sourceSha,
+      snapshotDigest: value.snapshotDigest
+    }))
+    .digest("hex");
+}
+
+function oneShotCommandBody(action) {
+  return action === "close" ? "/odinn-maintainer close" : "/odinn-maintainer repair";
+}
+
+export function bindOneShotAuthorization(
+  snapshot,
+  { eventName, payload, actor, now = Date.now() } = {}
+) {
+  if (eventName !== "issue_comment" || payload?.action !== "created") return null;
+  const comment = payload?.comment;
+  const body = String(comment?.body || "").trim();
+  const action = body === "/odinn-maintainer close"
+    ? "close"
+    : body === "/odinn-maintainer repair"
+      ? "repair"
+      : null;
+  if (!action) return null;
+  const commentId = Number(comment?.id || 0);
+  const author = String(comment?.user?.login || "");
+  const association = String(comment?.author_association || "").toUpperCase();
+  const createdAt = String(comment?.created_at || "");
+  const updatedAt = String(comment?.updated_at || "");
+  const created = Date.parse(createdAt);
+  const eventKind = payload?.issue?.pull_request ? "pull_request" : "issue";
+  if (
+    !Number.isSafeInteger(commentId) ||
+    commentId <= 0 ||
+    !/^[a-zA-Z0-9-]{1,100}$/u.test(author) ||
+    author.toLowerCase() !== String(actor || "").toLowerCase() ||
+    !AUTHORIZED_ASSOCIATIONS.has(association) ||
+    !Number.isFinite(created) ||
+    created > now + 60_000 ||
+    now - created > ONE_SHOT_COMMAND_TTL_MS ||
+    updatedAt !== createdAt ||
+    Number(payload?.issue?.number || 0) !== snapshot.number ||
+    eventKind !== snapshot.kind
+  ) {
+    return null;
+  }
+  const authorization = {
+    action,
+    commentId,
+    author,
+    association,
+    body,
+    createdAt,
+    updatedAt,
+    target: { kind: snapshot.kind, number: snapshot.number },
+    sourceSha: String(snapshot.sourceSha),
+    snapshotDigest: snapshotDigest(snapshot)
+  };
+  return {
+    ...authorization,
+    digest: oneShotAuthorizationDigest(authorization)
+  };
+}
+
+function validateOneShotAuthorization(value, {
+  target,
+  sourceSha,
+  snapshotDigest: plannedSnapshotDigest,
+  createdAt: planCreatedAt
+}) {
+  if (value === null) return null;
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("one-shot authorization is invalid");
+  }
+  exactKeys(value, [
+    "action",
+    "commentId",
+    "author",
+    "association",
+    "body",
+    "createdAt",
+    "updatedAt",
+    "target",
+    "sourceSha",
+    "snapshotDigest",
+    "digest"
+  ], "one-shot authorization");
+  if (!["close", "repair"].includes(value.action)) throw new Error("one-shot action is invalid");
+  if (!Number.isSafeInteger(value.commentId) || value.commentId <= 0) {
+    throw new Error("one-shot comment ID is invalid");
+  }
+  const author = boundedString(value.author, "one-shot author", 100);
+  if (!/^[a-zA-Z0-9-]{1,100}$/u.test(author)) throw new Error("one-shot author is invalid");
+  if (!AUTHORIZED_ASSOCIATIONS.has(value.association)) {
+    throw new Error("one-shot author association is invalid");
+  }
+  if (value.body !== oneShotCommandBody(value.action)) {
+    throw new Error("one-shot command body is invalid");
+  }
+  const created = Date.parse(value.createdAt);
+  const updated = Date.parse(value.updatedAt);
+  const planned = Date.parse(planCreatedAt);
+  if (
+    !Number.isFinite(created) ||
+    !Number.isFinite(updated) ||
+    value.updatedAt !== value.createdAt ||
+    created > planned + 60_000 ||
+    planned - created > ONE_SHOT_COMMAND_TTL_MS
+  ) {
+    throw new Error("one-shot command is stale, edited, or future-dated");
+  }
+  if (!value.target || typeof value.target !== "object" || Array.isArray(value.target)) {
+    throw new Error("one-shot target is invalid");
+  }
+  exactKeys(value.target, ["kind", "number"], "one-shot target");
+  if (value.target.kind !== target.kind || value.target.number !== target.number) {
+    throw new Error("one-shot target does not match the plan");
+  }
+  if (
+    value.sourceSha !== sourceSha ||
+    value.snapshotDigest !== plannedSnapshotDigest ||
+    !/^[0-9a-f]{64}$/u.test(value.digest) ||
+    value.digest !== oneShotAuthorizationDigest(value)
+  ) {
+    throw new Error("one-shot authorization is not bound to the plan snapshot");
+  }
+  return {
+    ...value,
+    author
+  };
+}
+
+function liveOneShotCommand(snapshot, action, authorization, { actor, now = Date.now() } = {}) {
+  if (!authorization || authorization.action !== action) return null;
+  if (String(actor || "").toLowerCase() !== authorization.author.toLowerCase()) return null;
+  const created = Date.parse(authorization.createdAt);
+  if (
+    !Number.isFinite(created) ||
+    created > now + 60_000 ||
+    now - created > ONE_SHOT_COMMAND_TTL_MS ||
+    authorization.target.kind !== snapshot.kind ||
+    authorization.target.number !== snapshot.number ||
+    authorization.sourceSha !== String(snapshot.sourceSha)
+  ) {
+    return null;
+  }
+  const comments = [...(snapshot.allComments || []), ...(snapshot.comments || [])];
+  const command = comments.find((comment) =>
+    Number(comment.id) === authorization.commentId &&
+    String(comment.author || "").toLowerCase() === authorization.author.toLowerCase() &&
+    String(comment.authorAssociation || "").toUpperCase() === authorization.association &&
+    String(comment.createdAt || "") === authorization.createdAt &&
+    String(comment.updatedAt || "") === authorization.updatedAt &&
+    String(comment.body || "").trim() === authorization.body
+  );
+  return command || null;
+}
+
+function parseOneShotReceipt(comment, trustedLogin) {
+  if (
+    String(comment?.user?.login || "").toLowerCase() !== String(trustedLogin || "").toLowerCase() ||
+    String(comment?.user?.type || "").toLowerCase() !== "bot"
+  ) {
+    return null;
+  }
+  const match = new RegExp(
+    `<!-- ${ONE_SHOT_RECEIPT_MARKER} v=(\\d+) payload=([A-Za-z0-9_-]+) -->`,
+    "u"
+  ).exec(String(comment?.body || ""));
+  if (!match || Number(match[1]) !== ONE_SHOT_RECEIPT_VERSION) return null;
+  let value;
+  try {
+    value = JSON.parse(Buffer.from(match[2], "base64url").toString("utf8"));
+  } catch {
+    return null;
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  try {
+    exactKeys(value, [
+      "authorizationDigest",
+      "action",
+      "commandId",
+      "author",
+      "association",
+      "body",
+      "createdAt",
+      "updatedAt",
+      "target",
+      "sourceSha",
+      "snapshotDigest",
+      "claimedBy",
+      "runId",
+      "runAttempt"
+    ], "one-shot receipt");
+  } catch {
+    return null;
+  }
+  return { ...value, commentId: Number(comment.id || 0) };
+}
+
+function oneShotReceiptBody(authorization, { actor, runId, runAttempt }) {
+  const payload = {
+    authorizationDigest: authorization.digest,
+    action: authorization.action,
+    commandId: authorization.commentId,
+    author: authorization.author,
+    association: authorization.association,
+    body: authorization.body,
+    createdAt: authorization.createdAt,
+    updatedAt: authorization.updatedAt,
+    target: authorization.target,
+    sourceSha: authorization.sourceSha,
+    snapshotDigest: authorization.snapshotDigest,
+    claimedBy: actor,
+    runId,
+    runAttempt
+  };
+  const encoded = Buffer.from(JSON.stringify(payload), "utf8").toString("base64url");
+  return [
+    `<!-- ${ONE_SHOT_RECEIPT_MARKER} v=${ONE_SHOT_RECEIPT_VERSION} payload=${encoded} -->`,
+    "Odinn Maintainer consumed this one-shot authorization before applying its guarded action.",
+    "",
+    `Action: \`${authorization.action}\`; command comment: \`${authorization.commentId}\`; run: \`${runId}\` attempt \`${runAttempt}\`.`
+  ].join("\n");
+}
+
+export async function consumeOneShotAuthorization(
+  api,
+  authorization,
+  {
+    actor,
+    trustedLogin = "github-actions[bot]",
+    runId,
+    runAttempt = 1
+  } = {}
+) {
+  if (!authorization) throw new Error("one-shot authorization is required");
+  if (String(actor || "").toLowerCase() !== authorization.author.toLowerCase()) {
+    throw new Error("one-shot authorization actor changed before consumption");
+  }
+  const normalizedRunId = String(runId || "");
+  const normalizedAttempt = Number(runAttempt);
+  if (!/^[1-9][0-9]{0,19}$/u.test(normalizedRunId) || !Number.isSafeInteger(normalizedAttempt) || normalizedAttempt < 1) {
+    throw new Error("one-shot authorization run identity is invalid");
+  }
+  const receipts = async () => {
+    const page = await api.comments(authorization.target.number);
+    if (!page?.complete || !Array.isArray(page.items)) {
+      throw new Error("cannot safely consume a command from incomplete comment history");
+    }
+    const matching = page.items
+      .map((comment) => parseOneShotReceipt(comment, trustedLogin))
+      .filter((receipt) => receipt?.authorizationDigest === authorization.digest);
+    for (const receipt of matching) {
+      if (
+        receipt.action !== authorization.action ||
+        receipt.commandId !== authorization.commentId ||
+        receipt.author !== authorization.author ||
+        receipt.association !== authorization.association ||
+        receipt.body !== authorization.body ||
+        receipt.createdAt !== authorization.createdAt ||
+        receipt.updatedAt !== authorization.updatedAt ||
+        receipt.target?.kind !== authorization.target.kind ||
+        receipt.target?.number !== authorization.target.number ||
+        receipt.sourceSha !== authorization.sourceSha ||
+        receipt.snapshotDigest !== authorization.snapshotDigest ||
+        String(receipt.claimedBy).toLowerCase() !== authorization.author.toLowerCase()
+      ) {
+        throw new Error("one-shot authorization has a tampered consumption receipt");
+      }
+    }
+    return matching;
+  };
+  const before = await receipts();
+  if (before.length) {
+    throw new Error(
+      before.length === 1
+        ? "one-shot authorization was already consumed"
+        : "one-shot authorization has ambiguous consumption receipts"
+    );
+  }
+  const created = await api.createComment(
+    authorization.target.number,
+    oneShotReceiptBody(authorization, {
+      actor: authorization.author,
+      runId: normalizedRunId,
+      runAttempt: normalizedAttempt
+    })
+  );
+  const createdId = Number(created?.id || 0);
+  if (!Number.isSafeInteger(createdId) || createdId <= 0) {
+    throw new Error("one-shot consumption receipt was not created");
+  }
+  const after = await receipts();
+  if (after.length !== 1 || after[0].commentId !== createdId) {
+    throw new Error("one-shot authorization consumption raced or became ambiguous");
+  }
+  return after[0];
 }
 
 export function validateRepairPath(value) {
@@ -133,6 +447,7 @@ export function buildPlan({
   confidence,
   review = null,
   repairBase = null,
+  oneShotAuthorization = null,
   createdAt = new Date().toISOString()
 }) {
   return validatePlan({
@@ -148,7 +463,8 @@ export function buildPlan({
     decision,
     confidence,
     review,
-    repairBase
+    repairBase,
+    oneShotAuthorization
   }, { now: Date.parse(createdAt) });
 }
 
@@ -213,13 +529,20 @@ export function validatePlan(value, { now = Date.now() } = {}) {
       MAX_REPAIR_FILE_BYTES * 3
     );
   }
+  const oneShotAuthorization = validateOneShotAuthorization(value.oneShotAuthorization, {
+    target: value.target,
+    sourceSha: value.sourceSha,
+    snapshotDigest: digest,
+    createdAt: value.createdAt
+  });
   return {
     ...value,
     repository,
     snapshotDigest: digest,
     stableSnapshotDigest: stableDigest,
     review,
-    repairBase
+    repairBase,
+    oneShotAuthorization
   };
 }
 
@@ -276,11 +599,13 @@ export async function collectRepairCandidates(api, snapshot, { enabled: allowRep
   return { candidates, base: { branch, sha: sha.toLowerCase() } };
 }
 
-export function closeGuard(snapshot, review, { allow, actor }) {
+export function closeGuard(snapshot, review, { allow, actor, authorization, now }) {
   if (!allow) return { allowed: false, reason: "close capability disabled" };
   if (!hasLabel(snapshot, CLOSE_OPT_IN_LABEL)) return { allowed: false, reason: "close opt-in label absent" };
   if (!snapshot.complete || snapshot.state !== "open") return { allowed: false, reason: "item is not complete and open" };
-  if (!authorizedCommand(snapshot, "close")) return { allowed: false, reason: "authorized close command absent" };
+  if (!liveOneShotCommand(snapshot, "close", authorization, { actor, now })) {
+    return { allowed: false, reason: "fresh event-bound close command absent" };
+  }
   if (review.decision !== "close_candidate" || review.confidence !== "high" || review.evidence.length < 2) {
     return { allowed: false, reason: "review does not satisfy close evidence policy" };
   }
@@ -319,12 +644,12 @@ export function mergeGuard(snapshot, review, { allow, actor }) {
   return { allowed: true, reason: "same-repository guarded merge" };
 }
 
-export function repairGuard(snapshot, review, { allow, repairBase, actor }) {
+export function repairGuard(snapshot, review, { allow, repairBase, actor, authorization, now }) {
   if (!allow) return { allowed: false, reason: "repair capability disabled" };
   if (!hasLabel(snapshot, REPAIR_OPT_IN_LABEL)) return { allowed: false, reason: "repair opt-in label absent" };
   if (!snapshot.complete || snapshot.state !== "open") return { allowed: false, reason: "item is not complete and open" };
-  if (!authorizedCommand(snapshot, "repair")) {
-    return { allowed: false, reason: "authorized repair command absent" };
+  if (!liveOneShotCommand(snapshot, "repair", authorization, { actor, now })) {
+    return { allowed: false, reason: "fresh event-bound repair command absent" };
   }
   if (!repairBase || !review.repair.requested) return { allowed: false, reason: "no bounded repair was requested" };
   return { allowed: true, reason: "bounded repair plan" };

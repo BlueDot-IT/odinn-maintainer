@@ -68,7 +68,11 @@ actor must have `write`, `maintain`, or `admin` permission.
 Additional item-level gates are mandatory:
 
 - Close requires `odinn:allow-close`, high-confidence evidence, and an exact
-  `/odinn-maintainer close` command from the authorized event actor.
+  `/odinn-maintainer close` command created by the authorized event actor.
+  Close and repair commands are bound to the exact unedited comment, target,
+  source state, and plan snapshot for 60 minutes. Before mutation, `apply`
+  writes and re-fetches a bot-authored repository-visible consumption receipt;
+  reruns and later events fail closed rather than reuse that command.
 - Merge requires `odinn:allow-merge` and
   `/odinn-maintainer merge HEAD_SHA` from that actor. Only same-repository,
   non-draft pull requests with strict branch protection and successful live
@@ -86,7 +90,8 @@ Additional item-level gates are mandatory:
   `odinn:needs-human`, and `odinn:close-candidate` labels.
 
 The apply job refuses stale item context, a changed repair base tip, ambiguous
-multiple actions, incomplete API pagination, and expired plans. Repair branch
+multiple actions, incomplete API pagination, consumed or ambiguously claimed
+one-shot commands, and expired plans. Repair branch
 names and commit messages are executor-derived; an existing matching branch or
 pull request is reconciled on retry.
 

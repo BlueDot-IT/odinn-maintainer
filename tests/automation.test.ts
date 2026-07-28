@@ -4,10 +4,12 @@ import test from "node:test";
 import {
   applyMerge,
   applyRepair,
+  bindOneShotAuthorization,
   buildPlan,
   capabilityAllowed,
   closeGuard,
   CLOSE_OPT_IN_LABEL,
+  consumeOneShotAuthorization,
   mergeGuard,
   MERGE_OPT_IN_LABEL,
   repairGuard,
@@ -77,9 +79,42 @@ function command(body: string, overrides: Record<string, unknown> = {}) {
     authorType: "User",
     authorAssociation: "MEMBER",
     body,
+    createdAt: "2026-07-25T00:00:00Z",
     updatedAt: "2026-07-25T00:00:00Z",
     ...overrides
   };
+}
+
+function oneShot(
+  item: ReturnType<typeof snapshot>,
+  action: "close" | "repair",
+  overrides: Record<string, unknown> = {}
+) {
+  const body = `/odinn-maintainer ${action}`;
+  const commentValue = command(body, overrides);
+  const now = Date.parse("2026-07-25T00:05:00Z");
+  const authorization = bindOneShotAuthorization(item, {
+    eventName: "issue_comment",
+    actor: commentValue.author,
+    now,
+    payload: {
+      action: "created",
+      issue: {
+        number: item.number,
+        ...(item.kind === "pull_request" ? { pull_request: {} } : {})
+      },
+      comment: {
+        id: commentValue.id,
+        body,
+        user: { login: commentValue.author },
+        author_association: commentValue.authorAssociation,
+        created_at: commentValue.createdAt,
+        updated_at: commentValue.updatedAt
+      }
+    }
+  });
+  assert.ok(authorization);
+  return { authorization, now };
 }
 
 test("global kill switch and actor authorization gate every autonomous capability", () => {
@@ -108,17 +143,47 @@ test("close requires opt-in, strong evidence, and an authorized exact command fr
     decision: "close_candidate",
     closeReason: "invalid"
   });
-  assert.equal(closeGuard(item, closeReview, { allow: true, actor: "alice" }).allowed, true);
+  const bound = oneShot(item, "close");
+  assert.equal(
+    closeGuard(item, closeReview, {
+      allow: true,
+      actor: "alice",
+      authorization: bound.authorization,
+      now: bound.now
+    }).allowed,
+    true
+  );
   assert.equal(closeGuard(item, closeReview, { allow: false, actor: "alice" }).allowed, false);
-  assert.equal(closeGuard(item, closeReview, { allow: true, actor: "github-actions[bot]" }).allowed, true);
+  assert.equal(
+    closeGuard(item, closeReview, {
+      allow: true,
+      actor: "github-actions[bot]",
+      authorization: bound.authorization,
+      now: bound.now
+    }).allowed,
+    false
+  );
   assert.equal(
     closeGuard(
       { ...item, allComments: [command("/odinn-maintainer close", { authorAssociation: "CONTRIBUTOR" })] },
       closeReview,
-      { allow: true, actor: "alice" }
+      { allow: true, actor: "alice", authorization: bound.authorization, now: bound.now }
     ).allowed,
     false
   );
+  for (const changedCommand of [
+    command("/odinn-maintainer repair"),
+    command("/odinn-maintainer close", { updatedAt: "2026-07-25T00:00:01Z" })
+  ]) {
+    assert.equal(
+      closeGuard(
+        { ...item, allComments: [changedCommand] },
+        closeReview,
+        { allow: true, actor: "alice", authorization: bound.authorization, now: bound.now }
+      ).allowed,
+      false
+    );
+  }
 });
 
 test("merge is same-repository, success-only, squash-only, and exact-head commanded", async () => {
@@ -127,6 +192,14 @@ test("merge is same-repository, success-only, squash-only, and exact-head comman
     allComments: [command(`/odinn-maintainer merge ${headSha}`)]
   });
   assert.equal(mergeGuard(item, review(), { allow: true, actor: "alice" }).allowed, true);
+  assert.equal(
+    mergeGuard(
+      { ...item, allComments: [command(`/odinn-maintainer automerge ${headSha}`)] },
+      review(),
+      { allow: true, actor: "github-actions[bot]" }
+    ).allowed,
+    true
+  );
   assert.equal(
     mergeGuard(
       { ...item, checks: [{ name: "test", status: "completed", conclusion: "neutral" }] },
@@ -235,11 +308,14 @@ test("repair is command-gated and restricted to checked-in source, docs, and tes
     labels: [REPAIR_OPT_IN_LABEL],
     comments: [command("/odinn-maintainer repair")]
   });
+  const bound = oneShot(item, "repair");
   assert.equal(
     repairGuard(item, repairReview, {
       allow: true,
       actor: "alice",
-      repairBase: { branch: "main", sha: baseSha }
+      repairBase: { branch: "main", sha: baseSha },
+      authorization: bound.authorization,
+      now: bound.now
     }).allowed,
     true
   );
@@ -247,9 +323,215 @@ test("repair is command-gated and restricted to checked-in source, docs, and tes
     repairGuard({ ...item, comments: [] }, repairReview, {
       allow: true,
       actor: "alice",
-      repairBase: { branch: "main", sha: baseSha }
+      repairBase: { branch: "main", sha: baseSha },
+      authorization: bound.authorization,
+      now: bound.now
     }).allowed,
     false
+  );
+});
+
+test("one-shot commands bind exact actor, event, timestamps, target, source, and plan digest", () => {
+  const item = snapshot({
+    labels: [CLOSE_OPT_IN_LABEL],
+    allComments: [command("/odinn-maintainer close")]
+  });
+  const bound = oneShot(item, "close");
+  assert.equal(
+    bindOneShotAuthorization(item, {
+      eventName: "schedule",
+      actor: "github-actions[bot]",
+      now: bound.now,
+      payload: {}
+    }),
+    null
+  );
+  const eventComment = command("/odinn-maintainer close");
+  const eventPayload = {
+    action: "created",
+    issue: { number: item.number, pull_request: {} },
+    comment: {
+      id: eventComment.id,
+      body: eventComment.body,
+      user: { login: eventComment.author },
+      author_association: eventComment.authorAssociation,
+      created_at: eventComment.createdAt,
+      updated_at: eventComment.updatedAt
+    }
+  };
+  assert.equal(
+    bindOneShotAuthorization(item, {
+      eventName: "issue_comment",
+      actor: "alice",
+      now: bound.now,
+      payload: { ...eventPayload, issue: { number: item.number + 1, pull_request: {} } }
+    }),
+    null
+  );
+  assert.equal(
+    bindOneShotAuthorization(item, {
+      eventName: "issue_comment",
+      actor: "alice",
+      now: bound.now,
+      payload: {
+        ...eventPayload,
+        comment: {
+          ...eventPayload.comment,
+          created_at: "2026-07-25T00:07:00Z",
+          updated_at: "2026-07-25T00:07:00Z"
+        }
+      }
+    }),
+    null
+  );
+  for (const overrides of [
+    { author: "bob" },
+    { authorAssociation: "CONTRIBUTOR" },
+    { updatedAt: "2026-07-25T00:00:01Z" },
+    { createdAt: "2026-07-24T22:00:00Z", updatedAt: "2026-07-24T22:00:00Z" }
+  ]) {
+    const changed = command("/odinn-maintainer close", overrides);
+    assert.equal(
+      bindOneShotAuthorization(item, {
+        eventName: "issue_comment",
+        actor: "alice",
+        now: bound.now,
+        payload: {
+          action: "created",
+          issue: { number: item.number, pull_request: {} },
+          comment: {
+            id: changed.id,
+            body: changed.body,
+            user: { login: changed.author },
+            author_association: changed.authorAssociation,
+            created_at: changed.createdAt,
+            updated_at: changed.updatedAt
+          }
+        }
+      }),
+      null
+    );
+  }
+  const closeReview = review({ decision: "close_candidate", closeReason: "invalid" });
+  assert.equal(
+    closeGuard(
+      { ...item, sourceSha: "c".repeat(40) },
+      closeReview,
+      { allow: true, actor: "alice", authorization: bound.authorization, now: bound.now }
+    ).allowed,
+    false
+  );
+  assert.throws(
+    () => validatePlan({
+      ...buildPlan({
+        repository: item.repo,
+        snapshot: item,
+        model: "test",
+        mode: "review",
+        decision: closeReview.decision,
+        confidence: closeReview.confidence,
+        review: closeReview,
+        oneShotAuthorization: bound.authorization,
+        createdAt: "2026-07-25T00:05:00Z"
+      }),
+      snapshotDigest: "f".repeat(64)
+    }, { now: bound.now }),
+    /not bound/
+  );
+});
+
+test("one-shot consumption creates one trusted durable receipt and rejects reruns or races", async () => {
+  const item = snapshot({
+    labels: [REPAIR_OPT_IN_LABEL],
+    comments: [command("/odinn-maintainer repair")]
+  });
+  const { authorization } = oneShot(item, "repair");
+  const comments: Record<string, unknown>[] = [];
+  let nextId = 100;
+  const api = {
+    comments: async () => ({ items: [...comments], complete: true }),
+    createComment: async (_number: number, body: string) => {
+      const created = {
+        id: nextId++,
+        body,
+        user: { login: "github-actions[bot]", type: "Bot" }
+      };
+      comments.push(created);
+      return created;
+    }
+  };
+  const receipt = await consumeOneShotAuthorization(api, authorization, {
+    actor: "alice",
+    runId: "1234",
+    runAttempt: 1
+  });
+  assert.equal(receipt.commandId, 1);
+  assert.equal(receipt.author, "alice");
+  await assert.rejects(
+    consumeOneShotAuthorization(api, authorization, {
+      actor: "alice",
+      runId: "1234",
+      runAttempt: 2
+    }),
+    /already consumed/
+  );
+  await assert.rejects(
+    consumeOneShotAuthorization(api, authorization, {
+      actor: "github-actions[bot]",
+      runId: "1235",
+      runAttempt: 1
+    }),
+    /actor changed/
+  );
+  const marker = /payload=([A-Za-z0-9_-]+)/u.exec(String(comments[0].body));
+  assert.ok(marker);
+  const tamperedPayload = JSON.parse(Buffer.from(marker[1], "base64url").toString("utf8"));
+  tamperedPayload.author = "mallory";
+  const tamperedBody = String(comments[0].body).replace(
+    marker[1],
+    Buffer.from(JSON.stringify(tamperedPayload), "utf8").toString("base64url")
+  );
+  await assert.rejects(
+    consumeOneShotAuthorization(
+      {
+        comments: async () => ({
+          items: [{ ...comments[0], body: tamperedBody }],
+          complete: true
+        }),
+        createComment: api.createComment
+      },
+      authorization,
+      { actor: "alice", runId: "1235", runAttempt: 1 }
+    ),
+    /tampered/
+  );
+  await assert.rejects(
+    consumeOneShotAuthorization(
+      {
+        comments: async () => ({ items: [], complete: false }),
+        createComment: api.createComment
+      },
+      authorization,
+      { actor: "alice", runId: "1236", runAttempt: 1 }
+    ),
+    /incomplete/
+  );
+  const racingComments: Record<string, unknown>[] = [];
+  await assert.rejects(
+    consumeOneShotAuthorization(
+      {
+        comments: async () => ({ items: [...racingComments], complete: true }),
+        createComment: async (_number: number, body: string) => {
+          const own = { id: 200, body, user: { login: "github-actions[bot]", type: "Bot" } };
+          const rival = { id: 201, body, user: { login: "github-actions[bot]", type: "Bot" } };
+          racingComments.push(own, rival);
+          return own;
+        }
+      },
+      authorization,
+      { actor: "alice", runId: "1237", runAttempt: 1 }
+    ),
+    /raced or became ambiguous/
   );
 });
 

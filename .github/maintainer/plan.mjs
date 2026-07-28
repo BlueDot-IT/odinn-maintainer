@@ -11,6 +11,7 @@ import {
   validateEventRepository
 } from "./core.mjs";
 import {
+  bindOneShotAuthorization,
   buildPlan,
   collectRepairCandidates,
   enabled,
@@ -46,6 +47,11 @@ async function main() {
     allowAnonymous: !process.env.GITHUB_READ_TOKEN
   });
   let snapshot = await buildSnapshot(api, target);
+  const oneShotAuthorization = bindOneShotAuthorization(snapshot, {
+    eventName,
+    payload,
+    actor: process.env.GITHUB_ACTOR || ""
+  });
   const model = process.env.ODINN_MAINTAINER_MODEL || "gpt-5.5";
   const policy = evaluatePolicy(snapshot, {
     force: eventName === "workflow_dispatch",
@@ -59,7 +65,8 @@ async function main() {
       model,
       mode: "skipped",
       decision: "skipped",
-      confidence: "not_applicable"
+      confidence: "not_applicable",
+      oneShotAuthorization
     });
   } else {
     const repairOptedIn = (snapshot.labels || []).some(
@@ -78,7 +85,8 @@ async function main() {
         model,
         mode: "cached",
         decision: "keep_open",
-        confidence: "cached"
+        confidence: "cached",
+        oneShotAuthorization
       });
     } else {
       const oauthTransport = {
@@ -110,7 +118,8 @@ async function main() {
         decision: review.decision,
         confidence: review.confidence,
         review,
-        repairBase: review.repair.requested ? repair.base : null
+        repairBase: review.repair.requested ? repair.base : null,
+        oneShotAuthorization
       });
     }
   }
