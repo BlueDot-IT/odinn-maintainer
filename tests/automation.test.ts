@@ -264,6 +264,14 @@ test("planning and apply action boundaries keep OAuth away from the writer", () 
   assert.match(applyAction, /default: "false"/u);
 });
 
+test("documented caller blocks Apply unless Plan succeeds", () => {
+  const readme = readFileSync(".github/maintainer/README.md", "utf8");
+  assert.doesNotMatch(readme, /continue-on-error:\s*true/u);
+  assert.match(readme, /needs:\s*plan/u);
+  assert.match(readme, /if:\s*\$\{\{ needs\.plan\.result == 'success' \}\}/u);
+  assert.match(readme, /no plan artifact/u);
+});
+
 test("plans expire and repair apply rechecks the executor-derived default branch tip", async () => {
   const item = snapshot({ kind: "issue", sourceSha: "2026-07-25T00:00:00Z" });
   const createdAt = "2026-07-25T00:00:00.000Z";

@@ -131,6 +131,9 @@ jobs:
 
   apply:
     needs: plan
+    # Do not use job-level continue-on-error on Plan. Apply must run only after
+    # Plan produced and uploaded a valid artifact.
+    if: ${{ needs.plan.result == 'success' }}
     permissions:
       contents: write
       issues: write
@@ -166,6 +169,15 @@ ChatGPT Codex Responses transport Odinn uses. It does not use
 OAuth and model endpoints are fixed to their exact HTTPS paths, requests have
 hard timeouts and byte limits, and token values are never placed in model
 input, comments, checks, artifacts, or logs.
+
+Before a non-cached model review, Plan validates the OAuth record and performs
+at most one required refresh. An authentication failure produces one bounded,
+redacted diagnostic and no plan artifact. Callers must not set job-level
+`continue-on-error` on Plan, and Apply must require a successful Plan job. This
+circuit breaker prevents a write-capable Apply job from starting without a
+valid plan; it does not persist rotated refresh tokens. Deployments using
+rotating refresh tokens still need a supported broker or another durable,
+serialized credential store outside this action.
 
 The compatibility action's write surface remains limited to its sticky comment
 and named Check. The guarded apply action exposes only fixed label operations,
