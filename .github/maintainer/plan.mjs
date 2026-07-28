@@ -5,6 +5,7 @@ import {
   evaluatePolicy,
   findReusableReview,
   GitHubApi,
+  preflightOAuthCredential,
   resolveTarget,
   reviewWithOAuthModel,
   validateEventRepository
@@ -80,16 +81,23 @@ async function main() {
         confidence: "cached"
       });
     } else {
+      const oauthTransport = {
+        tokenUrl: process.env.ODINN_OPENAI_OAUTH_TOKEN_URL || "https://auth.openai.com/oauth/token",
+        clientId: process.env.ODINN_OPENAI_OAUTH_CLIENT_ID || "app_EMoamEEZ73f0CkXaXp7hrann"
+      };
+      const oauthCredential = await preflightOAuthCredential({
+        oauthJson: process.env.ODINN_OPENAI_OAUTH_JSON,
+        ...oauthTransport
+      });
       const repair = await collectRepairCandidates(api, snapshot, {
         enabled: enabled(process.env.ODINN_MAINTAINER_ALLOW_AUTOMATION)
           && enabled(process.env.ODINN_MAINTAINER_ALLOW_REPAIR)
       });
       snapshot = { ...snapshot, repairCandidates: repair.candidates };
       const review = await reviewWithOAuthModel(snapshot, {
-        oauthJson: process.env.ODINN_OPENAI_OAUTH_JSON,
+        oauthCredential,
         model,
-        tokenUrl: process.env.ODINN_OPENAI_OAUTH_TOKEN_URL || "https://auth.openai.com/oauth/token",
-        clientId: process.env.ODINN_OPENAI_OAUTH_CLIENT_ID || "app_EMoamEEZ73f0CkXaXp7hrann",
+        ...oauthTransport,
         baseUrl: process.env.ODINN_OPENAI_CODEX_BASE_URL || "https://chatgpt.com/backend-api/codex",
         originator: process.env.ODINN_OPENAI_ORIGINATOR || "odinn-maintainer",
         clientVersion: process.env.ODINN_OPENAI_CLIENT_VERSION || "4.0.3"
@@ -123,6 +131,10 @@ async function main() {
 }
 
 main().catch((error) => {
-  console.error(`Odinn Maintainer planning failed: ${error instanceof Error ? error.message : String(error)}`);
+  const message = error instanceof Error ? error.message : String(error);
+  const suffix = message.startsWith("OAuth preflight failed:")
+    ? " No plan artifact was produced; Apply must remain blocked."
+    : "";
+  console.error(`Odinn Maintainer planning failed: ${message}${suffix}`);
   process.exitCode = 1;
 });

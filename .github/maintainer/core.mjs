@@ -844,6 +844,39 @@ async function oauthTokenRefresh(credential, { tokenUrl, clientId, fetchImpl, ti
   });
 }
 
+function oauthPreflightReason(error) {
+  const message = error instanceof Error ? error.message : String(error);
+  const status = /OAuth token endpoint returned HTTP (\d{3})/u.exec(message)?.[1];
+  if (status) return `token endpoint returned HTTP ${status}`;
+  if (/valid OAuth JSON|OAuth credential object|no access or refresh token/iu.test(message)) {
+    return "credential is missing or malformed";
+  }
+  if (/expired and no refresh token/iu.test(message)) return "expired credential has no refresh token";
+  if (/transport URL|client id/iu.test(message)) return "transport configuration is invalid";
+  return "credential validation request failed";
+}
+
+export async function preflightOAuthCredential({
+  oauthJson,
+  tokenUrl = "https://auth.openai.com/oauth/token",
+  clientId = "app_EMoamEEZ73f0CkXaXp7hrann",
+  timeoutMs = 120_000,
+  fetchImpl = fetch
+} = {}) {
+  try {
+    if (!oauthJson) throw new Error("OAuth credential is missing");
+    if (!/^[a-zA-Z0-9._-]{1,200}$/u.test(clientId)) throw new Error("OAuth client id is invalid");
+    validateTransportUrl(tokenUrl, "https://auth.openai.com/oauth/token");
+    let credential = parseOAuthCredential(oauthJson);
+    if (!credential.accessToken || (credential.expiresAt && credential.expiresAt <= Date.now() + 60_000)) {
+      credential = await oauthTokenRefresh(credential, { tokenUrl, clientId, fetchImpl, timeoutMs });
+    }
+    return credential;
+  } catch (error) {
+    throw new Error(`OAuth preflight failed: ${oauthPreflightReason(error)}`);
+  }
+}
+
 function codexAccountId(accessToken) {
   const parts = accessToken.split(".");
   if (parts.length !== 3) return "";
@@ -902,6 +935,7 @@ async function readCodexResponse(response) {
 
 export async function reviewWithOAuthModel(snapshot, {
   oauthJson,
+  oauthCredential,
   model = "gpt-5.5",
   tokenUrl = "https://auth.openai.com/oauth/token",
   clientId = "app_EMoamEEZ73f0CkXaXp7hrann",
@@ -911,17 +945,17 @@ export async function reviewWithOAuthModel(snapshot, {
   timeoutMs = 120_000,
   fetchImpl = fetch
 } = {}) {
-  if (!oauthJson) throw new Error("ODINN_OPENAI_OAUTH_JSON is required for the maintainer review");
+  if (!oauthJson && !oauthCredential) throw new Error("ODINN_OPENAI_OAUTH_JSON is required for the maintainer review");
+  if (oauthJson && oauthCredential) throw new Error("maintainer review received ambiguous OAuth credentials");
   if (!/^[a-zA-Z0-9._-]{1,100}$/u.test(model)) throw new Error("maintainer model is invalid");
   if (!/^[a-zA-Z0-9._-]{1,100}$/u.test(originator)) throw new Error("OAuth originator is invalid");
   if (!/^[a-zA-Z0-9._-]{1,100}$/u.test(clientVersion)) throw new Error("OAuth client version is invalid");
   if (!/^[a-zA-Z0-9._-]{1,200}$/u.test(clientId)) throw new Error("OAuth client id is invalid");
   validateTransportUrl(tokenUrl, "https://auth.openai.com/oauth/token");
   validateTransportUrl(baseUrl, "https://chatgpt.com/backend-api/codex");
-  let credential = parseOAuthCredential(oauthJson);
-  if (!credential.accessToken || (credential.expiresAt && credential.expiresAt <= Date.now() + 60_000)) {
-    credential = await oauthTokenRefresh(credential, { tokenUrl, clientId, fetchImpl, timeoutMs });
-  }
+  let credential = oauthCredential
+    ? parseOAuthCredential(oauthCredential)
+    : await preflightOAuthCredential({ oauthJson, tokenUrl, clientId, timeoutMs, fetchImpl });
   const requestModel = async (accessToken) => {
     const accountId = codexAccountId(accessToken);
     return fetchImpl(`${baseUrl.replace(/\/$/u, "")}/responses`, {

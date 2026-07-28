@@ -8,6 +8,7 @@ import {
   evaluatePolicy,
   findReusableReview,
   GitHubApi,
+  preflightOAuthCredential,
   renderComment,
   resolveTarget,
   reviewCacheKey,
@@ -478,6 +479,61 @@ test("OAuth refresh uses the fixed ChatGPT Codex Responses transport and strict 
     }),
     /must be https:\/\/chatgpt\.com/
   );
+});
+
+test("OAuth preflight refreshes once and hands the validated credential to the model", async () => {
+  let refreshes = 0;
+  const oauthCredential = await preflightOAuthCredential({
+    oauthJson: JSON.stringify({ refresh_token: "refresh-old", expires_at: 1 }),
+    fetchImpl: async (url) => {
+      assert.equal(url, "https://auth.openai.com/oauth/token");
+      refreshes += 1;
+      return new Response(
+        JSON.stringify({ access_token: "access-ready", refresh_token: "refresh-new", expires_in: 3600 }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }
+  });
+  assert.equal(refreshes, 1);
+
+  let modelCalls = 0;
+  const result = await reviewWithOAuthModel(snapshot(), {
+    oauthCredential,
+    fetchImpl: async (url, init = {}) => {
+      assert.equal(url, "https://chatgpt.com/backend-api/codex/responses");
+      assert.equal((init.headers as Record<string, string>).authorization, "Bearer access-ready");
+      modelCalls += 1;
+      return new Response(
+        'data: {"type":"response.output_text.delta","delta":"{\\"decision\\":\\"needs_human\\",\\"confidence\\":\\"medium\\",\\"summary\\":\\"Needs review.\\",\\"reason\\":\\"Evidence is incomplete.\\",\\"evidence\\":[],\\"recommendedNextStep\\":\\"Ask a maintainer.\\",\\"closeReason\\":\\"none\\",\\"relatedNumber\\":0,\\"repair\\":{\\"requested\\":false,\\"title\\":\\"\\",\\"body\\":\\"\\",\\"changes\\":[]}}"}\n\n',
+        { status: 200, headers: { "content-type": "text/event-stream" } }
+      );
+    }
+  });
+  assert.equal(result.decision, "needs_human");
+  assert.equal(modelCalls, 1);
+  assert.equal(refreshes, 1);
+});
+
+test("OAuth preflight fails once with a bounded redacted diagnostic", async () => {
+  const refreshCanary = "refresh-secret-canary";
+  const bodyCanary = "response-secret-canary";
+  let calls = 0;
+  await assert.rejects(
+    preflightOAuthCredential({
+      oauthJson: JSON.stringify({ refresh_token: refreshCanary, expires_at: 1 }),
+      fetchImpl: async () => {
+        calls += 1;
+        return new Response(`${bodyCanary} ${refreshCanary}`, { status: 401 });
+      }
+    }),
+    (error: unknown) => {
+      const message = String((error as Error).message);
+      return /OAuth preflight failed: token endpoint returned HTTP 401/u.test(message)
+        && !message.includes(refreshCanary)
+        && !message.includes(bodyCanary);
+    }
+  );
+  assert.equal(calls, 1);
 });
 
 test("OAuth and model failures never include credential or response-body canaries", async () => {
