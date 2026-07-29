@@ -109,7 +109,7 @@ jobs:
           "$CODEX_SECURITY_BIN" scan "$TARGET_DIR" \
             --mode standard \
             --output-dir "$SCAN_DIR" \
-            --max-cost 5 \
+            --max-cost 10 \
             --json > "$RUNNER_TEMP/codex-security.json"
 
       - name: Export SARIF

@@ -33,3 +33,7 @@ test("hosted Ubuntu runner proves the Codex sandbox before spending scan tokens"
       workflow.indexOf("name: Scan repository")
   );
 });
+
+test("Forge scan has a bounded cost ceiling large enough for the repository", () => {
+  assert.match(workflow, /--max-cost 10/u);
+});
