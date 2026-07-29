@@ -1,0 +1,297 @@
+name: Codex Security remediation
+
+on:
+  workflow_call:
+    inputs:
+      target_ref:
+        description: Trusted target branch to scan and remediate.
+        required: false
+        type: string
+        default: main
+    secrets:
+      oauth_json:
+        description: File-backed ChatGPT OAuth record for Codex Security.
+        required: true
+
+permissions: {}
+
+concurrency:
+  group: codex-security-remediation-${{ github.repository }}
+  cancel-in-progress: false
+
+env:
+  CODEX_SECURITY_PACKAGE: "@openai/codex-security@0.1.1"
+  TARGET_DIR: ${{ github.workspace }}/odinn-forge
+
+jobs:
+  remediate:
+    name: Prepare bounded remediation pull request
+    if: github.repository == 'BlueDot-IT/Odinn-Forge'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      actions: write
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: "24"
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6
+        with:
+          version: "10.14.0"
+          run_install: false
+
+      - name: Set up Python
+        uses: actions/setup-python@d537c9c845f6d2677d0f7e2bb8bd25a7a79c77ef # v6
+        with:
+          python-version: "3.x"
+
+      - name: Install Codex Security
+        env:
+          INSTALL_DIR: ${{ runner.temp }}/codex-security
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$INSTALL_DIR"
+          npm install \
+            --prefix "$INSTALL_DIR" \
+            --ignore-scripts \
+            --no-audit \
+            --no-fund \
+            "$CODEX_SECURITY_PACKAGE"
+
+      - name: Verify Codex Security and Linux sandbox
+        env:
+          CODEX_SECURITY_BIN: ${{ runner.temp }}/codex-security/node_modules/.bin/codex-security
+          CODEX_BIN: ${{ runner.temp }}/codex-security/node_modules/.bin/codex
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -x "$CODEX_SECURITY_BIN"
+          test -x "$CODEX_BIN"
+          "$CODEX_SECURITY_BIN" --version
+
+          if test "$(sysctl -n kernel.apparmor_restrict_unprivileged_userns)" = "1"; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
+          "$CODEX_BIN" sandbox true
+
+      - name: Check out trusted Forge branch
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          repository: BlueDot-IT/Odinn-Forge
+          ref: ${{ inputs.target_ref }}
+          path: odinn-forge
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Restore ChatGPT OAuth sign-in
+        env:
+          CODEX_HOME: ${{ runner.temp }}/codex-home
+          CODEX_SECURITY_BIN: ${{ runner.temp }}/codex-security/node_modules/.bin/codex-security
+          OAUTH_JSON: ${{ secrets.oauth_json }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$OAUTH_JSON"
+          mkdir -p "$CODEX_HOME"
+          chmod 700 "$CODEX_HOME"
+          printf '%s' "$OAUTH_JSON" > "$CODEX_HOME/auth.json"
+          chmod 600 "$CODEX_HOME/auth.json"
+          "$CODEX_SECURITY_BIN" login status
+
+      - name: Scan current Forge main
+        id: scan
+        env:
+          CODEX_HOME: ${{ runner.temp }}/codex-home
+          CODEX_SECURITY_BIN: ${{ runner.temp }}/codex-security/node_modules/.bin/codex-security
+          SCAN_DIR: ${{ runner.temp }}/codex-security-results
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! "$CODEX_SECURITY_BIN" scan "$TARGET_DIR" \
+            --mode standard \
+            --model gpt-5.6-terra \
+            --output-dir "$SCAN_DIR" \
+            --max-cost 20 \
+            --json > "$RUNNER_TEMP/codex-security.json" \
+            2> "$RUNNER_TEMP/codex-security-scan.log"; then
+            echo "Codex Security did not produce a complete scan." >&2
+            exit 1
+          fi
+
+          test -s "$SCAN_DIR/scan-manifest.json"
+          test -s "$SCAN_DIR/findings.json"
+          test "$(jq -r '.scan.status' "$SCAN_DIR/scan-manifest.json")" = "completed"
+          test "$(jq -r '.completeness' "$SCAN_DIR/coverage.json")" = "complete"
+
+          base_sha=$(git -C "$TARGET_DIR" rev-parse HEAD)
+          scan_sha=$(jq -r '.scan.target.revision' "$SCAN_DIR/scan-manifest.json")
+          test "$base_sha" = "$scan_sha"
+
+          finding_count=$(jq '.findings | length' "$SCAN_DIR/findings.json")
+          echo "base-sha=$base_sha" >> "$GITHUB_OUTPUT"
+          echo "finding-count=$finding_count" >> "$GITHUB_OUTPUT"
+
+      - name: Generate candidate remediation
+        if: steps.scan.outputs.finding-count != '0'
+        env:
+          CODEX_HOME: ${{ runner.temp }}/codex-home
+          CODEX_SECURITY_BIN: ${{ runner.temp }}/codex-security/node_modules/.bin/codex-security
+          FINDINGS_FILE: ${{ runner.temp }}/codex-security-results/findings.json
+        working-directory: ${{ env.TARGET_DIR }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! "$CODEX_SECURITY_BIN" patch "$FINDINGS_FILE" \
+            > "$RUNNER_TEMP/codex-security-patch.log" 2>&1; then
+            echo "Codex Security could not generate a complete remediation." >&2
+            exit 1
+          fi
+
+      - name: Validate candidate remediation
+        id: candidate
+        if: steps.scan.outputs.finding-count != '0'
+        env:
+          FINDINGS_FILE: ${{ runner.temp }}/codex-security-results/findings.json
+          BASE_SHA: ${{ steps.scan.outputs.base-sha }}
+        working-directory: ${{ env.TARGET_DIR }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$BASE_SHA"
+          test -z "$(git diff --cached --name-only)"
+
+          git add -N -- .
+          mapfile -d '' changed < <(git diff --name-only --diff-filter=ACMRTUXB -z)
+          test "${#changed[@]}" -gt 0
+          test "${#changed[@]}" -le 20
+          test -z "$(git diff --name-only --diff-filter=D)"
+          git diff --check
+
+          if git diff --summary | grep -Eq 'mode change|create mode 120000|create mode 160000'; then
+            echo "Candidate changes file modes, symlinks, or submodules." >&2
+            exit 1
+          fi
+
+          if git diff --numstat | awk '$1 == "-" || $2 == "-" { found=1 } END { exit !found }'; then
+            echo "Candidate contains a binary change." >&2
+            exit 1
+          fi
+
+          diff_bytes=$(git diff --binary | wc -c)
+          test "$diff_bytes" -le 300000
+
+          jq -r '.findings[].locations[].path' "$FINDINGS_FILE" |
+            sort -u > "$RUNNER_TEMP/codex-security-affected-paths.txt"
+
+          for path in "${changed[@]}"; do
+            case "$path" in
+              .github/*|.git/*|scripts/*|package.json|pnpm-lock.yaml|\
+              *credentials*|*secrets*|*.env|*.pem|*.key)
+                echo "Candidate touches a denied path." >&2
+                exit 1
+                ;;
+              test/*|tests/*|docs/*)
+                ;;
+              *)
+                if ! grep -Fqx -- "$path" "$RUNNER_TEMP/codex-security-affected-paths.txt"; then
+                  echo "Candidate expands beyond affected files and bounded proof paths." >&2
+                  exit 1
+                fi
+                ;;
+            esac
+          done
+
+          fingerprint=$(
+            jq -r '.findings[].fingerprints.primary' "$FINDINGS_FILE" |
+              sort |
+              sha256sum |
+              cut -d' ' -f1
+          )
+          branch="odinn-maintainer/security-${BASE_SHA:0:12}-${fingerprint:0:12}"
+          echo "branch=$branch" >> "$GITHUB_OUTPUT"
+
+      - name: Verify candidate against Forge checks
+        if: steps.scan.outputs.finding-count != '0'
+        working-directory: ${{ env.TARGET_DIR }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm install --frozen-lockfile
+          pnpm check
+
+      - name: Commit candidate locally
+        if: steps.scan.outputs.finding-count != '0'
+        env:
+          BRANCH: ${{ steps.candidate.outputs.branch }}
+        working-directory: ${{ env.TARGET_DIR }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git switch -c "$BRANCH"
+          git add --all
+          git config user.name "odinn-maintainer[bot]"
+          git config user.email "odinn-maintainer[bot]@users.noreply.github.com"
+          git commit -m "security: apply automated Codex remediation"
+
+      - name: Push branch and open draft pull request
+        if: steps.scan.outputs.finding-count != '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ steps.candidate.outputs.branch }}
+          BASE_SHA: ${{ steps.scan.outputs.base-sha }}
+          TARGET_REF: ${{ inputs.target_ref }}
+        working-directory: ${{ env.TARGET_DIR }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh auth setup-git
+          git fetch origin "$TARGET_REF"
+          test "$(git rev-parse "origin/$TARGET_REF")" = "$BASE_SHA"
+
+          existing=$(
+            gh pr list \
+              --repo "$GITHUB_REPOSITORY" \
+              --state open \
+              --head "$BRANCH" \
+              --json url \
+              --jq '.[0].url // ""'
+          )
+          if test -n "$existing"; then
+            echo "Reusing existing bounded remediation pull request."
+            exit 0
+          fi
+
+          if git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
+            echo "A same-name branch exists without an open pull request." >&2
+            exit 1
+          fi
+
+          git push --set-upstream origin "$BRANCH"
+
+          body_file=$(mktemp)
+          printf '%s\n' \
+            'Automated bounded remediation for the latest complete Codex Security scan.' \
+            '' \
+            '- Generated from the current protected default-branch revision.' \
+            '- Candidate paths and diff size passed deterministic limits.' \
+            '- The full Forge check suite passed before publication.' \
+            '- No automatic merge is authorized; maintainer review is required.' \
+            > "$body_file"
+
+          gh pr create \
+            --repo "$GITHUB_REPOSITORY" \
+            --base "$TARGET_REF" \
+            --head "$BRANCH" \
+            --draft \
+            --title "security: apply automated hardening" \
+            --body-file "$body_file"
+
+          gh workflow run ci.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref "$BRANCH"

@@ -95,6 +95,27 @@ one-shot commands, and expired plans. Repair branch
 names and commit messages are executor-derived; an existing matching branch or
 pull request is reconciled on retry.
 
+## Codex Security remediation
+
+The reusable `codex-security-remediation.yml` workflow gives Odinn Forge a
+bounded automatic path from a complete Codex Security scan to a draft repair
+pull request. The thin caller remains in Forge while the implementation and
+policy stay in this repository.
+
+The workflow checks out only Forge's trusted default branch without persisted
+Git credentials. Scan and patch steps receive ChatGPT OAuth but never receive
+`GITHUB_TOKEN`. After Codex exits, deterministic gates bind the candidate to
+the scanned default-branch revision, restrict changes to affected files plus
+bounded tests/docs, deny GitHub workflows, scripts, manifests, credentials,
+secrets, deletions, binaries, modes, symlinks, and submodules, and cap both
+file count and diff size. The full Forge check suite must pass before a later
+step receives the caller-scoped write token.
+
+The write step rechecks the live default-branch tip, uses finding fingerprints
+and the base revision for deterministic deduplication, opens only a draft pull
+request, and explicitly dispatches Forge CI because events created with
+`GITHUB_TOKEN` do not recursively trigger workflows. It never merges.
+
 ## Caller workflow
 
 The Odinn repository keeps only a thin discovery/matrix workflow and pins these
