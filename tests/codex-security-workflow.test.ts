@@ -34,6 +34,7 @@ test("hosted Ubuntu runner proves the Codex sandbox before spending scan tokens"
   );
 });
 
-test("Forge scan has a bounded cost ceiling large enough for the repository", () => {
+test("Forge scan uses the scheduled-scan model with a bounded cost ceiling", () => {
+  assert.match(workflow, /--model gpt-5\.6-terra/u);
   assert.match(workflow, /--max-cost 10/u);
 });

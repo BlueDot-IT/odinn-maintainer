@@ -108,6 +108,7 @@ jobs:
           set -euo pipefail
           "$CODEX_SECURITY_BIN" scan "$TARGET_DIR" \
             --mode standard \
+            --model gpt-5.6-terra \
             --output-dir "$SCAN_DIR" \
             --max-cost 10 \
             --json > "$RUNNER_TEMP/codex-security.json"
