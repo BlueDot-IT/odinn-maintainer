@@ -23,3 +23,13 @@ test("centralized scan preserves Forge results without mispublishing SARIF", () 
   assert.doesNotMatch(workflow, /security-events: write/u);
   assert.doesNotMatch(workflow, /github\/codeql-action\/upload-sarif/u);
 });
+
+test("hosted Ubuntu runner proves the Codex sandbox before spending scan tokens", () => {
+  assert.match(workflow, /name: Verify Codex Linux sandbox/u);
+  assert.match(workflow, /kernel\.apparmor_restrict_unprivileged_userns=0/u);
+  assert.match(workflow, /"\$CODEX_BIN" sandbox true/u);
+  assert.ok(
+    workflow.indexOf("name: Verify Codex Linux sandbox") <
+      workflow.indexOf("name: Scan repository")
+  );
+});

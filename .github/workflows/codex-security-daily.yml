@@ -56,6 +56,22 @@ jobs:
           test -x "$CODEX_SECURITY_BIN"
           "$CODEX_SECURITY_BIN" --version
 
+      - name: Verify Codex Linux sandbox
+        env:
+          CODEX_BIN: ${{ runner.temp }}/codex-security/node_modules/.bin/codex
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -x "$CODEX_BIN"
+
+          # Ubuntu 24.04 hosted runners block the unprivileged user namespace
+          # that Codex's bubblewrap sandbox requires. This runner is ephemeral.
+          if test "$(sysctl -n kernel.apparmor_restrict_unprivileged_userns)" = "1"; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
+
+          "$CODEX_BIN" sandbox true
+
       - name: Check out repository
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
