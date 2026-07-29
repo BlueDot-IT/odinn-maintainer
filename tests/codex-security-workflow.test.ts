@@ -24,6 +24,17 @@ test("centralized scan preserves Forge results without mispublishing SARIF", () 
   assert.doesNotMatch(workflow, /github\/codeql-action\/upload-sarif/u);
 });
 
+test("public-repository artifacts are encrypted before upload", () => {
+  assert.match(workflow, /secrets\.ODINN_SECURITY_ARTIFACT_KEY/u);
+  assert.match(workflow, /openssl enc -aes-256-cbc -salt -pbkdf2 -iter 200000/u);
+  assert.match(workflow, /name: Preserve encrypted scan results/u);
+  assert.match(
+    workflow,
+    /path: \$\{\{ runner\.temp \}\}\/codex-security-results-\$\{\{ github\.run_id \}\}\.tar\.gz\.enc/u
+  );
+  assert.doesNotMatch(workflow, /name: Preserve scan results/u);
+});
+
 test("hosted Ubuntu runner proves the Codex sandbox before spending scan tokens", () => {
   assert.match(workflow, /name: Verify Codex Linux sandbox/u);
   assert.match(workflow, /kernel\.apparmor_restrict_unprivileged_userns=0/u);
