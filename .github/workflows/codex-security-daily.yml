@@ -29,7 +29,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  CODEX_SECURITY_PACKAGE: "@openai/codex-security@0.1.1"
+  CODEX_SECURITY_PACKAGE: "@openai/codex-security@0.1.3"
   TARGET_REPOSITORY: ${{ inputs.target_repository || 'BlueDot-IT/Odinn-Forge' }}
   TARGET_REF: ${{ inputs.target_ref || 'main' }}
   TARGET_DIR: ${{ github.workspace }}/target-repository
@@ -98,6 +98,14 @@ jobs:
           path: target-repository
           persist-credentials: false
           fetch-depth: 0
+
+      - name: Bind scan to an immutable worktree snapshot
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '%s\n' \
+            'Codex Security CI snapshot marker; intentionally untracked.' \
+            > "$TARGET_DIR/.codex-security-ci-snapshot"
 
       - name: Restore ChatGPT OAuth sign-in
         env:
