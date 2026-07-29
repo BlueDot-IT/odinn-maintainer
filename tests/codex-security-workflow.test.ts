@@ -7,14 +7,30 @@ const workflow = readFileSync(
   "utf8"
 );
 
-test("daily Codex Security scan is pinned and targets Odinn Forge", () => {
+test("daily Codex Security scan is pinned and defaults to Odinn Forge", () => {
   assert.match(workflow, /CODEX_SECURITY_PACKAGE: "@openai\/codex-security@0\.1\.1"/u);
-  assert.match(workflow, /TARGET_REPOSITORY: BlueDot-IT\/Odinn-Forge/u);
+  assert.match(
+    workflow,
+    /TARGET_REPOSITORY: \$\{\{ inputs\.target_repository \|\| 'BlueDot-IT\/Odinn-Forge' \}\}/u
+  );
   assert.match(workflow, /repository: \$\{\{ env\.TARGET_REPOSITORY \}\}/u);
   assert.match(workflow, /ref: \$\{\{ env\.TARGET_REF \}\}/u);
-  assert.match(workflow, /path: odinn-forge/u);
+  assert.match(workflow, /path: target-repository/u);
   assert.match(workflow, /scan "\$TARGET_DIR"/u);
   assert.doesNotMatch(workflow, /scan \. \\/u);
+});
+
+test("reusable callers are restricted to BlueDot and provide explicit secrets", () => {
+  assert.match(workflow, /^\s{2}workflow_call:$/mu);
+  assert.match(workflow, /target_repository:[\s\S]*?default: BlueDot-IT\/Odinn-Forge/u);
+  assert.match(workflow, /target_ref:[\s\S]*?default: main/u);
+  assert.match(workflow, /ODINN_OPENAI_OAUTH_JSON:[\s\S]*?required: true/u);
+  assert.match(workflow, /ODINN_SECURITY_ARTIFACT_KEY:[\s\S]*?required: true/u);
+  assert.match(workflow, /if: github\.repository_owner == 'BlueDot-IT'/u);
+  assert.match(
+    workflow,
+    /group: codex-security-daily-\$\{\{ inputs\.target_repository \|\| 'BlueDot-IT\/Odinn-Forge' \}\}/u
+  );
 });
 
 test("centralized scan preserves Forge results without mispublishing SARIF", () => {
@@ -45,7 +61,7 @@ test("hosted Ubuntu runner proves the Codex sandbox before spending scan tokens"
   );
 });
 
-test("Forge scan uses the scheduled-scan model with a bounded cost ceiling", () => {
+test("scheduled scans use the approved model with a bounded cost ceiling", () => {
   assert.match(workflow, /--model gpt-5\.6-terra/u);
   assert.match(workflow, /--max-cost 20/u);
 });
