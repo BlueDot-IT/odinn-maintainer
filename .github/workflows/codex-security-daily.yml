@@ -11,6 +11,12 @@ concurrency:
   group: codex-security-daily
   cancel-in-progress: true
 
+env:
+  CODEX_SECURITY_PACKAGE: "@openai/codex-security@0.1.1"
+  TARGET_REPOSITORY: BlueDot-IT/Odinn-Forge
+  TARGET_REF: main
+  TARGET_DIR: ${{ github.workspace }}/odinn-forge
+
 jobs:
   codex-security:
     name: Codex Security
@@ -19,7 +25,6 @@ jobs:
     permissions:
       actions: read
       contents: read
-      security-events: write
     steps:
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
@@ -32,15 +37,9 @@ jobs:
           python-version: "3.14"
 
       - name: Install Codex Security
-        env:
-          CODEX_SECURITY_PACKAGE: ${{ vars.CODEX_SECURITY_PACKAGE }}
         shell: bash
         run: |
           set -euo pipefail
-          if test -z "$CODEX_SECURITY_PACKAGE"; then
-            echo "Set the CODEX_SECURITY_PACKAGE repository or organization variable." >&2
-            exit 1
-          fi
           npm install \
             --prefix "$RUNNER_TEMP/codex-security" \
             --ignore-scripts \
@@ -60,7 +59,11 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
+          repository: ${{ env.TARGET_REPOSITORY }}
+          ref: ${{ env.TARGET_REF }}
+          path: odinn-forge
           persist-credentials: false
+          fetch-depth: 0
 
       - name: Restore ChatGPT OAuth sign-in
         env:
@@ -87,7 +90,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          "$CODEX_SECURITY_BIN" scan . \
+          "$CODEX_SECURITY_BIN" scan "$TARGET_DIR" \
             --mode standard \
             --output-dir "$SCAN_DIR" \
             --max-cost 5 \
@@ -106,18 +109,10 @@ jobs:
           if test -f "$SCAN_DIR/scan-manifest.json"; then
             "$CODEX_SECURITY_BIN" export "$SCAN_DIR" \
               --export-format sarif \
-              --source-root "$GITHUB_WORKSPACE" \
+              --source-root "$TARGET_DIR" \
               --output "$SARIF_FILE"
             echo "available=true" >> "$GITHUB_OUTPUT"
           fi
-
-      - name: Upload SARIF
-        if: always() && steps.export-sarif.outputs.available == 'true'
-        continue-on-error: true
-        uses: github/codeql-action/upload-sarif@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81 # v4
-        with:
-          sarif_file: ${{ runner.temp }}/codex-security.sarif
-          category: codex-security-daily
 
       - name: Preserve scan results
         if: always()
@@ -127,5 +122,6 @@ jobs:
           path: |
             ${{ runner.temp }}/codex-security-results
             ${{ runner.temp }}/codex-security.json
+            ${{ runner.temp }}/codex-security.sarif
           if-no-files-found: warn
           retention-days: 7
