@@ -110,7 +110,7 @@ jobs:
             --mode standard \
             --model gpt-5.6-terra \
             --output-dir "$SCAN_DIR" \
-            --max-cost 10 \
+            --max-cost 20 \
             --json > "$RUNNER_TEMP/codex-security.json"
 
       - name: Export SARIF
