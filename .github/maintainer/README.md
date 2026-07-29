@@ -116,6 +116,19 @@ and the base revision for deterministic deduplication, opens only a draft pull
 request, and explicitly dispatches Forge CI because events created with
 `GITHUB_TOKEN` do not recursively trigger workflows. It never merges.
 
+## Reusable Codex Security scans
+
+The hardened daily scan workflow is also callable by other BlueDot
+repositories. Each caller passes its own repository and trusted default branch,
+supplies its own OAuth and artifact-encryption secrets, and retains the
+encrypted result artifact in the caller repository. The implementation remains
+pinned here so package, sandbox, completeness, privacy, and retention controls
+do not drift across repositories.
+
+Calls from outside the BlueDot organization are rejected. The reusable workflow
+has read-only repository permissions, does not publish SARIF, never uploads raw
+findings, and does not modify the scanned repository.
+
 ## Caller workflow
 
 The Odinn repository keeps only a thin discovery/matrix workflow and pins these
