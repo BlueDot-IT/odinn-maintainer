@@ -8,7 +8,7 @@ const workflow = readFileSync(
 );
 
 test("daily Codex Security scan is pinned and defaults to Odinn Forge", () => {
-  assert.match(workflow, /CODEX_SECURITY_PACKAGE: "@openai\/codex-security@0\.1\.1"/u);
+  assert.match(workflow, /CODEX_SECURITY_PACKAGE: "@openai\/codex-security@0\.1\.3"/u);
   assert.match(
     workflow,
     /TARGET_REPOSITORY: \$\{\{ inputs\.target_repository \|\| 'BlueDot-IT\/Odinn-Forge' \}\}/u
@@ -16,6 +16,8 @@ test("daily Codex Security scan is pinned and defaults to Odinn Forge", () => {
   assert.match(workflow, /repository: \$\{\{ env\.TARGET_REPOSITORY \}\}/u);
   assert.match(workflow, /ref: \$\{\{ env\.TARGET_REF \}\}/u);
   assert.match(workflow, /path: target-repository/u);
+  assert.match(workflow, /name: Bind scan to an immutable worktree snapshot/u);
+  assert.match(workflow, /\.codex-security-ci-snapshot/u);
   assert.match(workflow, /scan "\$TARGET_DIR"/u);
   assert.doesNotMatch(workflow, /scan \. \\/u);
 });
