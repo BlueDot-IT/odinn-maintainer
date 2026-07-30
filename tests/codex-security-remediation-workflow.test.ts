@@ -15,19 +15,38 @@ test("remediation is caller-scoped to Odinn Forge and never auto-merges", () => 
   assert.doesNotMatch(workflow, /gh pr merge|mergePull|automerge/u);
 });
 
-test("model work and repository write credentials occupy separate steps", () => {
-  const patchStart = workflow.indexOf("name: Generate candidate remediation");
-  const writeStart = workflow.indexOf("name: Push branch and open draft pull request");
-  assert.ok(patchStart >= 0);
-  assert.ok(writeStart > patchStart);
+test("scanner installation verifies the complete resolved dependency graph", () => {
+  assert.match(workflow, /EXPECTED_LOCK_SHA256: 597ac0b6454620e6973d103b3937d66f948ceed0ab97c4bc06b979f0bd78488f/u);
+  assert.match(workflow, /--package-lock-only/u);
+  assert.match(workflow, /sha256sum --check --strict/u);
+  assert.match(workflow, /npm ci/u);
+  assert.match(workflow, /--ignore-scripts/u);
+});
 
-  const patchStep = workflow.slice(patchStart, writeStart);
-  assert.match(patchStep, /CODEX_HOME:/u);
-  assert.doesNotMatch(patchStep, /GH_TOKEN:|github\.token/u);
+test("model, validation, and publication occupy separate credential domains", () => {
+  const prepareStart = workflow.indexOf("\n  prepare:");
+  const validateStart = workflow.indexOf("\n  validate:");
+  const publishStart = workflow.indexOf("\n  publish:");
+  assert.ok(prepareStart >= 0);
+  assert.ok(validateStart > prepareStart);
+  assert.ok(publishStart > validateStart);
 
-  const writeStep = workflow.slice(writeStart);
-  assert.match(writeStep, /GH_TOKEN: \$\{\{ github\.token \}\}/u);
-  assert.doesNotMatch(writeStep, /CODEX_HOME:|oauth_json/u);
+  const prepareJob = workflow.slice(prepareStart, validateStart);
+  assert.match(prepareJob, /CODEX_HOME:/u);
+  assert.match(prepareJob, /permissions:\s*\n\s*contents: read/u);
+  assert.doesNotMatch(prepareJob, /GH_TOKEN:|contents: write|pull-requests: write/u);
+  assert.match(prepareJob, /name: Remove model credentials/u);
+  assert.match(prepareJob, /rm -rf -- "\$RUNNER_TEMP\/codex-home"/u);
+  assert.match(prepareJob, /rm -f -- "\$TARGET_DIR\/\.codex-security-ci-snapshot"/u);
+
+  const validateJob = workflow.slice(validateStart, publishStart);
+  assert.match(validateJob, /pnpm check/u);
+  assert.match(validateJob, /permissions:\s*\n\s*contents: read/u);
+  assert.doesNotMatch(validateJob, /CODEX_HOME:|oauth_json|GH_TOKEN:|contents: write/u);
+
+  const publishJob = workflow.slice(publishStart);
+  assert.match(publishJob, /GH_TOKEN: \$\{\{ github\.token \}\}/u);
+  assert.doesNotMatch(publishJob, /CODEX_HOME:|oauth_json|pnpm check/u);
 });
 
 test("candidate remediation is base-bound, bounded, and path restricted", () => {
@@ -37,14 +56,20 @@ test("candidate remediation is base-bound, bounded, and path restricted", () => 
   assert.match(workflow, /git diff --check/u);
   assert.match(workflow, /Candidate touches a denied path/u);
   assert.match(workflow, /fingerprints\.primary/u);
-  assert.match(workflow, /test "\$\(git rev-parse "origin\/\$TARGET_REF"\)" = "\$BASE_SHA"/u);
+  assert.match(workflow, /test "\$\(git rev-parse origin\/main\)" = "\$BASE_SHA"/u);
+  assert.match(workflow, /test "\$TARGET_REF" = "main"/u);
+  assert.match(workflow, /sha256sum --check candidate\.patch\.sha256/u);
 });
 
-test("candidate is verified before publication and CI is explicitly dispatched", () => {
+test("candidate is verified in a dependency job before publication and CI is explicitly dispatched", () => {
   const verifyStart = workflow.indexOf("name: Verify candidate against Forge checks");
+  const publishJob = workflow.indexOf("\n  publish:");
   const writeStart = workflow.indexOf("name: Push branch and open draft pull request");
   assert.ok(verifyStart >= 0);
+  assert.ok(publishJob > verifyStart);
   assert.ok(writeStart > verifyStart);
-  assert.match(workflow.slice(verifyStart, writeStart), /pnpm check/u);
+  assert.match(workflow.slice(verifyStart, publishJob), /pnpm check/u);
+  assert.match(workflow.slice(publishJob, writeStart), /needs: \[prepare, validate\]/u);
+  assert.match(workflow.slice(publishJob, writeStart), /needs\.validate\.result == 'success'/u);
   assert.match(workflow.slice(writeStart), /gh workflow run ci\.yml/u);
 });
