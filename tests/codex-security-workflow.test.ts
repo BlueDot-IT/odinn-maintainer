@@ -65,5 +65,5 @@ test("hosted Ubuntu runner proves the Codex sandbox before spending scan tokens"
 
 test("scheduled scans use the approved model with a bounded cost ceiling", () => {
   assert.match(workflow, /--model gpt-5\.6-terra/u);
-  assert.match(workflow, /--max-cost 20/u);
+  assert.match(workflow, /--max-cost 50/u);
 });
