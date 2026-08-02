@@ -28,7 +28,11 @@ reconciliation then produce a fresh decision from current state.
 
 The `targets` action turns direct events into a one-item queue, maps completed
 workflow runs back to their pull requests, and discovers up to 50 recently
-updated open pull requests and issues during a scheduled sweep. Caller workflow
+updated open pull requests and issues during a scheduled sweep. Scheduled
+queues alternate pull requests and issues before filling unused capacity, so
+one item type cannot consume every slot. The workflow run number rotates the
+starting window by 25 items per sweep, so older entries within each type are
+eventually selected without a private cursor database. Caller workflow
 concurrency serializes each target. A failed or interrupted run therefore
 recovers on the next GitHub event or sweep without a private database.
 
@@ -125,9 +129,19 @@ encrypted result artifact in the caller repository. The implementation remains
 pinned here so package, sandbox, completeness, privacy, and retention controls
 do not drift across repositories.
 
-Calls from outside the BlueDot organization are rejected. The reusable workflow
-has read-only repository permissions, does not publish SARIF, never uploads raw
-findings, and does not modify the scanned repository.
+Calls from outside the BlueDot organization are rejected. Reusable callers may
+scan only their own `main` branch; the maintainer's internal scheduled run may
+scan the fixed Odinn Forge target. The reusable workflow has read-only
+repository permissions, does not publish SARIF, never uploads raw findings, and
+does not modify the scanned repository. Encrypted artifacts include a keyed
+SHA-256 authentication sidecar that must be verified before decryption.
+
+Before scanning, the workflow installs target dependencies from a committed
+pnpm or npm lockfile with lifecycle scripts disabled. Scanner exit `2` is
+recorded as a completed partial-coverage result rather than mislabeled as an
+infrastructure crash. Canonical results, SARIF, and the scanner log are
+encrypted and uploaded before a final gate requires a completed manifest and
+complete coverage; partial scans still fail closed with an explicit summary.
 
 ## Caller workflow
 

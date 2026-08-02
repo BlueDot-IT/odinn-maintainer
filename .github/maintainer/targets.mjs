@@ -1,4 +1,5 @@
 import { appendFile, readFile } from "node:fs/promises";
+import { pathToFileURL } from "node:url";
 import { GitHubApi } from "./core.mjs";
 
 const MAX_TARGETS = 50;
@@ -46,21 +47,39 @@ export async function discoverTargets({
   eventName,
   payload,
   api,
-  includeIssues = true
+  includeIssues = true,
+  rotation = 0
 }) {
   if (eventName !== "schedule") {
     return directTarget(eventName, payload).slice(0, MAX_TARGETS);
   }
-  const pulls = await api.openPulls();
-  const targets = pulls.items.map((pull) => ({
+  const [pulls, issues] = await Promise.all([
+    api.openPulls(),
+    includeIssues ? api.openIssues() : Promise.resolve({ items: [], complete: true })
+  ]);
+  const pullTargets = pulls.items.map((pull) => ({
     kind: "pull_request",
     number: Number(pull.number)
   }));
-  if (includeIssues && targets.length < MAX_TARGETS) {
-    const issues = await api.openIssues();
-    targets.push(...issues.items
-      .filter((issue) => !issue.pull_request)
-      .map((issue) => ({ kind: "issue", number: Number(issue.number) })));
+  const issueTargets = issues.items
+    .filter((issue) => !issue.pull_request)
+    .map((issue) => ({ kind: "issue", number: Number(issue.number) }));
+  const rotate = (items) => {
+    if (items.length === 0) return items;
+    const offset = (Math.abs(Number(rotation) || 0) * Math.ceil(MAX_TARGETS / 2)) % items.length;
+    return items.slice(offset).concat(items.slice(0, offset));
+  };
+  const rotatedPulls = rotate(pullTargets);
+  const rotatedIssues = rotate(issueTargets);
+  const targets = [];
+  while (
+    targets.length < MAX_TARGETS &&
+    (rotatedPulls.length > 0 || rotatedIssues.length > 0)
+  ) {
+    if (rotatedPulls.length > 0) targets.push(rotatedPulls.shift());
+    if (targets.length < MAX_TARGETS && rotatedIssues.length > 0) {
+      targets.push(rotatedIssues.shift());
+    }
   }
   return targets
     .filter((target) => Number.isInteger(target.number) && target.number > 0)
@@ -79,14 +98,15 @@ async function main() {
     eventName: process.env.GITHUB_EVENT_NAME || "",
     payload,
     api,
-    includeIssues: process.env.ODINN_MAINTAINER_INCLUDE_ISSUES !== "false"
+    includeIssues: process.env.ODINN_MAINTAINER_INCLUDE_ISSUES !== "false",
+    rotation: process.env.GITHUB_RUN_NUMBER
   });
   await output("targets", JSON.stringify(targets));
   await output("count", targets.length);
   console.log(JSON.stringify({ ok: true, targets }));
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   main().catch((error) => {
     console.error(`Odinn Maintainer discovery failed: ${error instanceof Error ? error.message : String(error)}`);
     process.exitCode = 1;
