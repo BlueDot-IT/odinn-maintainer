@@ -136,6 +136,13 @@ repository permissions, does not publish SARIF, never uploads raw findings, and
 does not modify the scanned repository. Encrypted artifacts include a keyed
 SHA-256 authentication sidecar that must be verified before decryption.
 
+Before scanning, the workflow installs target dependencies from a committed
+pnpm or npm lockfile with lifecycle scripts disabled. Scanner exit `2` is
+recorded as a completed partial-coverage result rather than mislabeled as an
+infrastructure crash. Canonical results, SARIF, and the scanner log are
+encrypted and uploaded before a final gate requires a completed manifest and
+complete coverage; partial scans still fail closed with an explicit summary.
+
 ## Caller workflow
 
 The Odinn repository keeps only a thin discovery/matrix workflow and pins these

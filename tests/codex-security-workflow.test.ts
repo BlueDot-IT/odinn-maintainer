@@ -80,6 +80,23 @@ test("hosted Ubuntu runner proves the Codex sandbox before spending scan tokens"
   );
 });
 
+test("target dependencies are installed deterministically before scanning", () => {
+  assert.match(workflow, /name: Set up pnpm/u);
+  assert.match(workflow, /PNPM_VERSION: "10\.14\.0"/u);
+  assert.match(workflow, /pnpm --dir "\$TARGET_DIR" install --frozen-lockfile --ignore-scripts/u);
+  assert.match(workflow, /npm ci --prefix "\$TARGET_DIR" --ignore-scripts --no-audit --no-fund/u);
+  assert.ok(workflow.indexOf("name: Prepare target analysis dependencies") < workflow.indexOf("name: Scan repository"));
+});
+
+test("partial scans preserve encrypted diagnostics and then fail with explicit coverage semantics", () => {
+  assert.match(workflow, /id: scan/u);
+  assert.match(workflow, /echo "exit_code=\$scan_exit" >> "\$GITHUB_OUTPUT"/u);
+  assert.match(workflow, /codex-security-scan\.log/u);
+  assert.match(workflow, /name: Enforce complete scan coverage/u);
+  assert.match(workflow, /test "\$completeness" != "complete"/u);
+  assert.ok(workflow.indexOf("name: Preserve encrypted scan results") < workflow.indexOf("name: Enforce complete scan coverage"));
+});
+
 test("scheduled scans use the approved model with a bounded cost ceiling", () => {
   assert.match(workflow, /--model gpt-5\.6-terra/u);
 });
