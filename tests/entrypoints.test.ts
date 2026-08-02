@@ -5,7 +5,10 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
-const testWorkflow = readFileSync(new URL("../.github/workflows/test.yml", import.meta.url), "utf8");
+const testWorkflow = readFileSync(
+  new URL("../.github/workflows/test.yml", import.meta.url),
+  "utf8"
+).replace(/\r\n?/gu, "\n");
 
 function runEntrypoint(path, overrides = {}) {
   const inherited = {};
