@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
+const testWorkflow = readFileSync(new URL("../.github/workflows/test.yml", import.meta.url), "utf8");
 
 function runEntrypoint(path, overrides = {}) {
   const inherited = {};
@@ -51,4 +53,13 @@ test("review and target entrypoints fail closed without repository credentials",
   const targets = runEntrypoint(".github/maintainer/targets.mjs");
   assert.equal(targets.status, 1);
   assert.match(targets.stderr, /Odinn Maintainer discovery failed:/u);
+});
+
+test("the required test check aggregates the complete platform matrix", () => {
+  assert.match(testWorkflow, /^\s{2}test_matrix:$/mu);
+  assert.match(testWorkflow, /os: \[ubuntu-latest, windows-latest\]/u);
+  assert.match(testWorkflow, /^\s{2}test:\n\s{4}name: test$/mu);
+  assert.match(testWorkflow, /needs: test_matrix/u);
+  assert.match(testWorkflow, /MATRIX_RESULT: \$\{\{ needs\.test_matrix\.result \}\}/u);
+  assert.match(testWorkflow, /test "\$MATRIX_RESULT" = "success"/u);
 });

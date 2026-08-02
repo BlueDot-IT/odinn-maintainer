@@ -10,7 +10,8 @@ permissions:
   contents: read
 
 jobs:
-  test:
+  test_matrix:
+    name: test (${{ matrix.os }})
     strategy:
       fail-fast: false
       matrix:
@@ -25,3 +26,17 @@ jobs:
       - name: Measure imported-module coverage
         if: runner.os == 'Linux'
         run: node --experimental-test-coverage --test tests/*.test.ts
+
+  test:
+    name: test
+    if: ${{ always() }}
+    needs: test_matrix
+    runs-on: ubuntu-latest
+    steps:
+      - name: Enforce complete platform matrix
+        env:
+          MATRIX_RESULT: ${{ needs.test_matrix.result }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$MATRIX_RESULT" = "success"
