@@ -15,6 +15,14 @@ test("remediation is caller-scoped to Odinn Forge and never auto-merges", () => 
   assert.doesNotMatch(workflow, /gh pr merge|mergePull|automerge/u);
 });
 
+test("remediation uses the committed scanner lock", () => {
+  assert.match(workflow, /repository: BlueDot-IT\/odinn-maintainer[\s\S]*?ref: main/u);
+  assert.match(workflow, /cp "\$LOCK_DIR\/package\.json" "\$LOCK_DIR\/package-lock\.json" "\$INSTALL_DIR\/"/u);
+  assert.match(workflow, /npm ci/u);
+  assert.match(workflow, /--version\)" = "0\.1\.4"/u);
+  assert.doesNotMatch(workflow, /\bnpm install/u);
+});
+
 test("model work and repository write credentials occupy separate steps", () => {
   const patchStart = workflow.indexOf("name: Generate candidate remediation");
   const writeStart = workflow.indexOf("name: Push branch and open draft pull request");

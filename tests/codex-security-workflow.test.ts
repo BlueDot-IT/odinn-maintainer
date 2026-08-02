@@ -6,9 +6,16 @@ const workflow = readFileSync(
   new URL("../.github/workflows/codex-security-daily.yml", import.meta.url),
   "utf8"
 );
+const scannerPackage = JSON.parse(readFileSync(
+  new URL("../.github/codex-security/package.json", import.meta.url),
+  "utf8"
+));
+const scannerLock = JSON.parse(readFileSync(
+  new URL("../.github/codex-security/package-lock.json", import.meta.url),
+  "utf8"
+));
 
 test("daily Codex Security scan is pinned and defaults to Odinn Forge", () => {
-  assert.match(workflow, /CODEX_SECURITY_PACKAGE: "@openai\/codex-security@0\.1\.4"/u);
   assert.match(workflow, /--version\)" = "0\.1\.4"/u);
   assert.match(
     workflow,
@@ -24,11 +31,13 @@ test("daily Codex Security scan is pinned and defaults to Odinn Forge", () => {
 });
 
 test("scanner installation verifies the complete resolved dependency graph", () => {
-  assert.match(workflow, /EXPECTED_LOCK_SHA256: 597ac0b6454620e6973d103b3937d66f948ceed0ab97c4bc06b979f0bd78488f/u);
-  assert.match(workflow, /--package-lock-only/u);
-  assert.match(workflow, /sha256sum --check --strict/u);
+  assert.equal(scannerPackage.dependencies["@openai/codex-security"], "0.1.4");
+  assert.equal(scannerLock.packages["node_modules/@openai/codex-security"].version, "0.1.4");
+  assert.match(workflow, /repository: BlueDot-IT\/odinn-maintainer[\s\S]*?ref: main/u);
+  assert.match(workflow, /cp "\$LOCK_DIR\/package\.json" "\$LOCK_DIR\/package-lock\.json" "\$INSTALL_DIR\/"/u);
   assert.match(workflow, /npm ci/u);
   assert.match(workflow, /--ignore-scripts/u);
+  assert.doesNotMatch(workflow, /npm install|--package-lock-only|EXPECTED_LOCK_SHA256/u);
 });
 
 test("reusable callers are restricted to BlueDot and provide explicit secrets", () => {
