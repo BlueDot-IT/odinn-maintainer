@@ -142,6 +142,9 @@ recorded as a completed partial-coverage result rather than mislabeled as an
 infrastructure crash. Canonical results, SARIF, and the scanner log are
 encrypted and uploaded before a final gate requires a completed manifest and
 complete coverage; partial scans still fail closed with an explicit summary.
+The scanner and its complete transitive dependency graph are likewise installed
+with `npm ci` from the committed lock under `.github/codex-security/`; workflows
+never regenerate that lock during a run.
 
 ## Caller workflow
 

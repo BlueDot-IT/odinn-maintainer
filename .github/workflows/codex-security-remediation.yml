@@ -20,7 +20,6 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  CODEX_SECURITY_PACKAGE: "@openai/codex-security@0.1.1"
   TARGET_DIR: ${{ github.workspace }}/odinn-forge
 
 jobs:
@@ -50,19 +49,29 @@ jobs:
         with:
           python-version: "3.x"
 
+      - name: Check out scanner dependency lock
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          repository: BlueDot-IT/odinn-maintainer
+          ref: main
+          path: codex-security-control-plane
+          persist-credentials: false
+          sparse-checkout: .github/codex-security
+
       - name: Install Codex Security
         env:
           INSTALL_DIR: ${{ runner.temp }}/codex-security
+          LOCK_DIR: ${{ github.workspace }}/codex-security-control-plane/.github/codex-security
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p "$INSTALL_DIR"
-          npm install \
+          cp "$LOCK_DIR/package.json" "$LOCK_DIR/package-lock.json" "$INSTALL_DIR/"
+          npm ci \
             --prefix "$INSTALL_DIR" \
             --ignore-scripts \
             --no-audit \
-            --no-fund \
-            "$CODEX_SECURITY_PACKAGE"
+            --no-fund
 
       - name: Verify Codex Security and Linux sandbox
         env:
@@ -73,7 +82,7 @@ jobs:
           set -euo pipefail
           test -x "$CODEX_SECURITY_BIN"
           test -x "$CODEX_BIN"
-          "$CODEX_SECURITY_BIN" --version
+          test "$("$CODEX_SECURITY_BIN" --version)" = "0.1.4"
 
           if test "$(sysctl -n kernel.apparmor_restrict_unprivileged_userns)" = "1"; then
             sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0

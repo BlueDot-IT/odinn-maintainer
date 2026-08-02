@@ -29,7 +29,6 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  CODEX_SECURITY_PACKAGE: "@openai/codex-security@0.1.4"
   PNPM_VERSION: "10.14.0"
   NODE_OPTIONS: "--max-old-space-size=1536"
   TARGET_REPOSITORY: ${{ inputs.target_repository || 'BlueDot-IT/Odinn-Forge' }}
@@ -81,24 +80,24 @@ jobs:
         with:
           python-version: "3.14"
 
+      - name: Check out scanner dependency lock
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          repository: BlueDot-IT/odinn-maintainer
+          ref: main
+          path: codex-security-control-plane
+          persist-credentials: false
+          sparse-checkout: .github/codex-security
+
       - name: Install Codex Security
         env:
           INSTALL_DIR: ${{ runner.temp }}/codex-security
-          EXPECTED_LOCK_SHA256: 597ac0b6454620e6973d103b3937d66f948ceed0ab97c4bc06b979f0bd78488f
+          LOCK_DIR: ${{ github.workspace }}/codex-security-control-plane/.github/codex-security
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p "$INSTALL_DIR"
-          npm install \
-            --prefix "$INSTALL_DIR" \
-            --package-lock-only \
-            --ignore-scripts \
-            --no-audit \
-            --no-fund \
-            --save-exact \
-            "$CODEX_SECURITY_PACKAGE"
-          printf '%s  %s\n' "$EXPECTED_LOCK_SHA256" "$INSTALL_DIR/package-lock.json" |
-            sha256sum --check --strict
+          cp "$LOCK_DIR/package.json" "$LOCK_DIR/package-lock.json" "$INSTALL_DIR/"
           npm ci \
             --prefix "$INSTALL_DIR" \
             --ignore-scripts \
