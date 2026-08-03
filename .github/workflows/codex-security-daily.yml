@@ -2,7 +2,7 @@ name: Codex Security daily scan
 
 on:
   schedule:
-    - cron: "41 5 * * *"
+    - cron: "41 5 * * 0"
   workflow_dispatch:
   workflow_call:
     inputs:
