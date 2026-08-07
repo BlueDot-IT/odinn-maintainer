@@ -4,7 +4,7 @@ on:
   workflow_call:
     inputs:
       target_ref:
-        description: Trusted target branch to scan and remediate.
+        description: Trusted default branch to scan and remediate.
         required: false
         type: string
         default: main
@@ -23,16 +23,25 @@ env:
   TARGET_DIR: ${{ github.workspace }}/odinn-forge
 
 jobs:
-  remediate:
-    name: Prepare bounded remediation pull request
+  prepare:
+    name: Generate bounded candidate
     if: github.repository == 'BlueDot-IT/Odinn-Forge'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:
-      actions: write
-      contents: write
-      pull-requests: write
+      contents: read
+    outputs:
+      base-sha: ${{ steps.scan.outputs.base-sha }}
+      finding-count: ${{ steps.scan.outputs.finding-count }}
     steps:
+      - name: Validate trusted target
+        env:
+          TARGET_REF: ${{ inputs.target_ref }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$TARGET_REF" = "main"
+
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
@@ -45,9 +54,9 @@ jobs:
           run_install: false
 
       - name: Set up Python
-        uses: actions/setup-python@d537c9c845f6d2677d0f7e2bb8bd25a7a79c77ef # v6
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
-          python-version: "3.x"
+          python-version: "3.14"
 
       - name: Check out scanner dependency lock
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
@@ -62,11 +71,14 @@ jobs:
         env:
           INSTALL_DIR: ${{ runner.temp }}/codex-security
           LOCK_DIR: ${{ github.workspace }}/codex-security-control-plane/.github/codex-security
+          EXPECTED_LOCK_SHA256: c036a0a182450fe0e908a8eea82143fe55e7603e58b691d69c020785acb1cbc7
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p "$INSTALL_DIR"
           cp "$LOCK_DIR/package.json" "$LOCK_DIR/package-lock.json" "$INSTALL_DIR/"
+          printf '%s  %s\n' "$EXPECTED_LOCK_SHA256" "$INSTALL_DIR/package-lock.json" |
+            sha256sum --check --strict
           npm ci \
             --prefix "$INSTALL_DIR" \
             --ignore-scripts \
@@ -93,10 +105,18 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
           repository: BlueDot-IT/Odinn-Forge
-          ref: ${{ inputs.target_ref }}
+          ref: main
           path: odinn-forge
           fetch-depth: 0
           persist-credentials: false
+
+      - name: Bind scan to an immutable worktree snapshot
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '%s\n' \
+            'Codex Security CI snapshot marker; intentionally untracked.' \
+            > "$TARGET_DIR/.codex-security-ci-snapshot"
 
       - name: Restore ChatGPT OAuth sign-in
         env:
@@ -107,8 +127,7 @@ jobs:
         run: |
           set -euo pipefail
           test -n "$OAUTH_JSON"
-          mkdir -p "$CODEX_HOME"
-          chmod 700 "$CODEX_HOME"
+          install -d -m 700 "$CODEX_HOME"
           printf '%s' "$OAUTH_JSON" > "$CODEX_HOME/auth.json"
           chmod 600 "$CODEX_HOME/auth.json"
           "$CODEX_SECURITY_BIN" login status
@@ -161,12 +180,23 @@ jobs:
             exit 1
           fi
 
-      - name: Validate candidate remediation
+      - name: Remove model credentials
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf -- "$RUNNER_TEMP/codex-home"
+          rm -f -- "$TARGET_DIR/.codex-security-ci-snapshot"
+          test ! -e "$RUNNER_TEMP/codex-home"
+          test ! -e "$TARGET_DIR/.codex-security-ci-snapshot"
+
+      - name: Package bounded candidate
         id: candidate
         if: steps.scan.outputs.finding-count != '0'
         env:
           FINDINGS_FILE: ${{ runner.temp }}/codex-security-results/findings.json
           BASE_SHA: ${{ steps.scan.outputs.base-sha }}
+          CANDIDATE_DIR: ${{ runner.temp }}/codex-security-candidate
         working-directory: ${{ env.TARGET_DIR }}
         shell: bash
         run: |
@@ -222,10 +252,82 @@ jobs:
               cut -d' ' -f1
           )
           branch="odinn-maintainer/security-${BASE_SHA:0:12}-${fingerprint:0:12}"
-          echo "branch=$branch" >> "$GITHUB_OUTPUT"
+
+          install -d -m 700 "$CANDIDATE_DIR"
+          printf '%s\n' "$BASE_SHA" > "$CANDIDATE_DIR/base-sha"
+          printf '%s\n' "$branch" > "$CANDIDATE_DIR/branch"
+          git diff --binary > "$CANDIDATE_DIR/candidate.patch"
+          sha256sum "$CANDIDATE_DIR/candidate.patch" > "$CANDIDATE_DIR/candidate.patch.sha256"
+
+      - name: Upload bounded candidate
+        if: steps.scan.outputs.finding-count != '0'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: codex-security-candidate-${{ github.run_id }}
+          path: ${{ runner.temp }}/codex-security-candidate
+          if-no-files-found: error
+          retention-days: 1
+
+  validate:
+    name: Validate candidate without credentials
+    needs: prepare
+    if: needs.prepare.outputs.finding-count != '0'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: "24"
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6
+        with:
+          version: "10.14.0"
+          run_install: false
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.14"
+
+      - name: Check out exact scanned revision
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          repository: BlueDot-IT/Odinn-Forge
+          ref: ${{ needs.prepare.outputs.base-sha }}
+          path: odinn-forge
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Download bounded candidate
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: codex-security-candidate-${{ github.run_id }}
+          path: ${{ runner.temp }}/codex-security-candidate
+
+      - name: Apply and verify candidate
+        env:
+          BASE_SHA: ${{ needs.prepare.outputs.base-sha }}
+          CANDIDATE_DIR: ${{ runner.temp }}/codex-security-candidate
+        working-directory: ${{ env.TARGET_DIR }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(cat "$CANDIDATE_DIR/base-sha")" = "$BASE_SHA"
+          grep -Eq '^odinn-maintainer/security-[0-9a-f]{12}-[0-9a-f]{12}$' "$CANDIDATE_DIR/branch"
+          (
+            cd "$CANDIDATE_DIR"
+            sha256sum --check candidate.patch.sha256
+          )
+          test "$(git rev-parse HEAD)" = "$BASE_SHA"
+          git apply --check "$CANDIDATE_DIR/candidate.patch"
+          git apply "$CANDIDATE_DIR/candidate.patch"
+          git diff --check
 
       - name: Verify candidate against Forge checks
-        if: steps.scan.outputs.finding-count != '0'
         working-directory: ${{ env.TARGET_DIR }}
         shell: bash
         run: |
@@ -233,40 +335,78 @@ jobs:
           pnpm install --frozen-lockfile
           pnpm check
 
-      - name: Commit candidate locally
-        if: steps.scan.outputs.finding-count != '0'
+  publish:
+    name: Publish validated draft pull request
+    needs: [prepare, validate]
+    if: needs.prepare.outputs.finding-count != '0' && needs.validate.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      actions: write
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Check out exact scanned revision
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          repository: BlueDot-IT/Odinn-Forge
+          ref: ${{ needs.prepare.outputs.base-sha }}
+          path: odinn-forge
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Download validated candidate
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: codex-security-candidate-${{ github.run_id }}
+          path: ${{ runner.temp }}/codex-security-candidate
+
+      - name: Reconstruct candidate commit
         env:
-          BRANCH: ${{ steps.candidate.outputs.branch }}
+          BASE_SHA: ${{ needs.prepare.outputs.base-sha }}
+          CANDIDATE_DIR: ${{ runner.temp }}/codex-security-candidate
         working-directory: ${{ env.TARGET_DIR }}
         shell: bash
         run: |
           set -euo pipefail
-          git switch -c "$BRANCH"
+          test "$(cat "$CANDIDATE_DIR/base-sha")" = "$BASE_SHA"
+          grep -Eq '^odinn-maintainer/security-[0-9a-f]{12}-[0-9a-f]{12}$' "$CANDIDATE_DIR/branch"
+          (
+            cd "$CANDIDATE_DIR"
+            sha256sum --check candidate.patch.sha256
+          )
+          test "$(git rev-parse HEAD)" = "$BASE_SHA"
+          git apply --check "$CANDIDATE_DIR/candidate.patch"
+          git apply "$CANDIDATE_DIR/candidate.patch"
+          git diff --check
+          test -z "$(git diff --name-only --diff-filter=D)"
+
+          branch=$(cat "$CANDIDATE_DIR/branch")
+          git switch -c "$branch"
           git add --all
           git config user.name "odinn-maintainer[bot]"
           git config user.email "odinn-maintainer[bot]@users.noreply.github.com"
           git commit -m "security: apply automated Codex remediation"
 
       - name: Push branch and open draft pull request
-        if: steps.scan.outputs.finding-count != '0'
         env:
           GH_TOKEN: ${{ github.token }}
-          BRANCH: ${{ steps.candidate.outputs.branch }}
-          BASE_SHA: ${{ steps.scan.outputs.base-sha }}
-          TARGET_REF: ${{ inputs.target_ref }}
+          BASE_SHA: ${{ needs.prepare.outputs.base-sha }}
+          CANDIDATE_DIR: ${{ runner.temp }}/codex-security-candidate
         working-directory: ${{ env.TARGET_DIR }}
         shell: bash
         run: |
           set -euo pipefail
+          branch=$(cat "$CANDIDATE_DIR/branch")
           gh auth setup-git
-          git fetch origin "$TARGET_REF"
-          test "$(git rev-parse "origin/$TARGET_REF")" = "$BASE_SHA"
+          git fetch origin main
+          test "$(git rev-parse origin/main)" = "$BASE_SHA"
 
           existing=$(
             gh pr list \
               --repo "$GITHUB_REPOSITORY" \
               --state open \
-              --head "$BRANCH" \
+              --head "$branch" \
               --json url \
               --jq '.[0].url // ""'
           )
@@ -275,12 +415,12 @@ jobs:
             exit 0
           fi
 
-          if git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
+          if git ls-remote --exit-code --heads origin "$branch" >/dev/null 2>&1; then
             echo "A same-name branch exists without an open pull request." >&2
             exit 1
           fi
 
-          git push --set-upstream origin "$BRANCH"
+          git push --set-upstream origin "$branch"
 
           body_file=$(mktemp)
           printf '%s\n' \
@@ -288,18 +428,18 @@ jobs:
             '' \
             '- Generated from the current protected default-branch revision.' \
             '- Candidate paths and diff size passed deterministic limits.' \
-            '- The full Forge check suite passed before publication.' \
+            '- Validation ran in a separate credential-free job.' \
             '- No automatic merge is authorized; maintainer review is required.' \
             > "$body_file"
 
           gh pr create \
             --repo "$GITHUB_REPOSITORY" \
-            --base "$TARGET_REF" \
-            --head "$BRANCH" \
+            --base main \
+            --head "$branch" \
             --draft \
             --title "security: apply automated hardening" \
             --body-file "$body_file"
 
           gh workflow run ci.yml \
             --repo "$GITHUB_REPOSITORY" \
-            --ref "$BRANCH"
+            --ref "$branch"
