@@ -2,7 +2,7 @@ name: Codex Security daily scan
 
 on:
   schedule:
-    - cron: "41 5 * * *"
+    - cron: "41 5 * * 0"
   workflow_dispatch:
   workflow_call:
     inputs:
@@ -29,7 +29,8 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  CODEX_SECURITY_PACKAGE: "@openai/codex-security@0.1.3"
+  PNPM_VERSION: "10.14.0"
+  NODE_OPTIONS: "--max-old-space-size=1536"
   TARGET_REPOSITORY: ${{ inputs.target_repository || 'BlueDot-IT/Odinn-Forge' }}
   TARGET_REF: ${{ inputs.target_ref || 'main' }}
   TARGET_DIR: ${{ github.workspace }}/target-repository
@@ -44,26 +45,64 @@ jobs:
       actions: read
       contents: read
     steps:
+      - name: Validate internal scan target
+        env:
+          CALLER_REPOSITORY: ${{ github.repository }}
+          REQUESTED_TARGET: ${{ inputs.target_repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "$TARGET_REPOSITORY" in
+            BlueDot-IT/*) ;;
+            *)
+              echo "Codex Security targets must remain inside BlueDot-IT." >&2
+              exit 1
+              ;;
+          esac
+          if test -n "$REQUESTED_TARGET"; then
+            test "$TARGET_REPOSITORY" = "$CALLER_REPOSITORY"
+          fi
+          test "$TARGET_REF" = "main"
+
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: "26"
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6
+        with:
+          version: ${{ env.PNPM_VERSION }}
+          run_install: false
 
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
           python-version: "3.14"
 
+      - name: Check out scanner dependency lock
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          repository: BlueDot-IT/odinn-maintainer
+          ref: main
+          path: codex-security-control-plane
+          persist-credentials: false
+          sparse-checkout: .github/codex-security
+
       - name: Install Codex Security
+        env:
+          INSTALL_DIR: ${{ runner.temp }}/codex-security
+          LOCK_DIR: ${{ github.workspace }}/codex-security-control-plane/.github/codex-security
         shell: bash
         run: |
           set -euo pipefail
-          npm install \
-            --prefix "$RUNNER_TEMP/codex-security" \
+          mkdir -p "$INSTALL_DIR"
+          cp "$LOCK_DIR/package.json" "$LOCK_DIR/package-lock.json" "$INSTALL_DIR/"
+          npm ci \
+            --prefix "$INSTALL_DIR" \
             --ignore-scripts \
             --no-audit \
-            --no-fund \
-            "$CODEX_SECURITY_PACKAGE"
+            --no-fund
 
       - name: Verify Codex Security
         env:
@@ -72,7 +111,7 @@ jobs:
         run: |
           set -euo pipefail
           test -x "$CODEX_SECURITY_BIN"
-          "$CODEX_SECURITY_BIN" --version
+          test "$("$CODEX_SECURITY_BIN" --version)" = "0.1.4"
 
       - name: Verify Codex Linux sandbox
         env:
@@ -107,6 +146,18 @@ jobs:
             'Codex Security CI snapshot marker; intentionally untracked.' \
             > "$TARGET_DIR/.codex-security-ci-snapshot"
 
+      - name: Prepare target analysis dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          if test -f "$TARGET_DIR/pnpm-lock.yaml"; then
+            pnpm --dir "$TARGET_DIR" install --frozen-lockfile --ignore-scripts
+          elif test -f "$TARGET_DIR/package-lock.json"; then
+            npm ci --prefix "$TARGET_DIR" --ignore-scripts --no-audit --no-fund
+          else
+            echo "No supported deterministic dependency lockfile was found; scan coverage must fail closed if project checks are unavailable." >&2
+          fi
+
       - name: Restore ChatGPT OAuth sign-in
         env:
           CODEX_HOME: ${{ runner.temp }}/codex-home
@@ -125,19 +176,31 @@ jobs:
           "$CODEX_SECURITY_BIN" login status
 
       - name: Scan repository
+        id: scan
         env:
           CODEX_HOME: ${{ runner.temp }}/codex-home
           CODEX_SECURITY_BIN: ${{ runner.temp }}/codex-security/node_modules/.bin/codex-security
           SCAN_DIR: ${{ runner.temp }}/codex-security-results
         shell: bash
         run: |
-          set -euo pipefail
+          set -uo pipefail
+          set +e
           "$CODEX_SECURITY_BIN" scan "$TARGET_DIR" \
             --mode standard \
             --model gpt-5.6-terra \
             --output-dir "$SCAN_DIR" \
-            --max-cost 20 \
-            --json > "$RUNNER_TEMP/codex-security.json"
+            --json > "$RUNNER_TEMP/codex-security.json" \
+            2> "$RUNNER_TEMP/codex-security-scan.log"
+          scan_exit=$?
+          set -e
+          echo "exit_code=$scan_exit" >> "$GITHUB_OUTPUT"
+          if ! test -f "$SCAN_DIR/scan-manifest.json" || ! test -f "$SCAN_DIR/coverage.json"; then
+            echo "Codex Security exited $scan_exit without canonical scan artifacts." >&2
+            exit 1
+          fi
+          if test "$scan_exit" -ne 0 && test "$scan_exit" -ne 2; then
+            echo "Codex Security infrastructure failure (exit $scan_exit); preserving encrypted diagnostics." >&2
+          fi
 
       - name: Export SARIF
         id: export-sarif
@@ -168,7 +231,7 @@ jobs:
           test -n "$RESULTS_ENCRYPTION_KEY"
 
           files=()
-          for name in codex-security-results codex-security.json codex-security.sarif; do
+          for name in codex-security-results codex-security.json codex-security.sarif codex-security-scan.log; do
             if test -e "$RUNNER_TEMP/$name"; then
               files+=("$name")
             fi
@@ -179,12 +242,56 @@ jobs:
             openssl enc -aes-256-cbc -salt -pbkdf2 -iter 200000 \
               -pass env:RESULTS_ENCRYPTION_KEY \
               -out "$ENCRYPTED_ARCHIVE"
+          python - "$ENCRYPTED_ARCHIVE" <<'PY'
+          import hashlib
+          import hmac
+          import os
+          from pathlib import Path
+          import sys
+
+          archive = Path(sys.argv[1])
+          key = hashlib.sha256(
+              b"odinn-security-artifact-mac-v1\0"
+              + os.environ["RESULTS_ENCRYPTION_KEY"].encode("utf-8")
+          ).digest()
+          archive.with_suffix(archive.suffix + ".hmac").write_text(
+              hmac.new(key, archive.read_bytes(), hashlib.sha256).hexdigest() + "\n",
+              encoding="ascii",
+          )
+          PY
 
       - name: Preserve encrypted scan results
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: codex-security-results-${{ github.run_id }}
-          path: ${{ runner.temp }}/codex-security-results-${{ github.run_id }}.tar.gz.enc
+          path: |
+            ${{ runner.temp }}/codex-security-results-${{ github.run_id }}.tar.gz.enc
+            ${{ runner.temp }}/codex-security-results-${{ github.run_id }}.tar.gz.enc.hmac
           if-no-files-found: error
           retention-days: 7
+
+      - name: Enforce complete scan coverage
+        if: always()
+        env:
+          SCAN_DIR: ${{ runner.temp }}/codex-security-results
+          SCAN_EXIT: ${{ steps.scan.outputs.exit_code }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f "$SCAN_DIR/scan-manifest.json"
+          test -f "$SCAN_DIR/coverage.json"
+          scan_status="$(jq -r '.scan.status // .status // "missing"' "$SCAN_DIR/scan-manifest.json")"
+          completeness="$(jq -r '.completeness // "missing"' "$SCAN_DIR/coverage.json")"
+          findings="$(jq -r '.findings | length' "$SCAN_DIR/findings.json")"
+          {
+            echo "## Codex Security daily scan"
+            echo "- Scanner exit: ${SCAN_EXIT:-missing}"
+            echo "- Scan status: $scan_status"
+            echo "- Coverage: $completeness"
+            echo "- Findings: $findings"
+          } >> "$GITHUB_STEP_SUMMARY"
+          if test "${SCAN_EXIT:-missing}" != "0" || test "$scan_status" != "completed" || test "$completeness" != "complete"; then
+            echo "Codex Security completed without full coverage; see the encrypted artifact for deferred evidence." >&2
+            exit 1
+          fi
