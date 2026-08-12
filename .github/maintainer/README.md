@@ -112,7 +112,8 @@ persisted Git credentials. It uses three isolated jobs:
 1. `prepare` receives ChatGPT OAuth and read-only repository access. It scans,
    patches, applies deterministic path/diff bounds, removes the OAuth directory,
    and uploads a checksummed candidate artifact. The scanner is installed with
-   the committed dependency lock and a checked-in lock hash.
+   the committed dependency manifest and lock, each protected by a checked-in
+   hash.
 2. `validate` receives neither OAuth nor write permissions. It checks out the
    exact scanned revision, verifies and applies the candidate artifact, then
    runs the full Forge check suite. Model-generated repository code executes
