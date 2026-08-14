@@ -61,6 +61,14 @@ test("candidate remediation is base-bound, bounded, and path restricted", () => 
   assert.match(workflow, /fingerprints\.primary/u);
   assert.match(workflow, /test "\$\(git rev-parse origin\/main\)" = "\$BASE_SHA"/u);
   assert.match(workflow, /test "\$TARGET_REF" = "main"/u);
+  assert.match(
+    workflow,
+    /cd "\$CANDIDATE_DIR"[\s\S]*?sha256sum candidate\.patch > candidate\.patch\.sha256/u
+  );
+  assert.doesNotMatch(
+    workflow,
+    /sha256sum "\$CANDIDATE_DIR\/candidate\.patch" > "\$CANDIDATE_DIR\/candidate\.patch\.sha256"/u
+  );
   assert.match(workflow, /sha256sum --check candidate\.patch\.sha256/u);
 });
 

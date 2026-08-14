@@ -260,7 +260,10 @@ jobs:
           printf '%s\n' "$BASE_SHA" > "$CANDIDATE_DIR/base-sha"
           printf '%s\n' "$branch" > "$CANDIDATE_DIR/branch"
           git diff --binary > "$CANDIDATE_DIR/candidate.patch"
-          sha256sum "$CANDIDATE_DIR/candidate.patch" > "$CANDIDATE_DIR/candidate.patch.sha256"
+          (
+            cd "$CANDIDATE_DIR"
+            sha256sum candidate.patch > candidate.patch.sha256
+          )
 
       - name: Upload bounded candidate
         if: steps.scan.outputs.finding-count != '0'
