@@ -17,8 +17,9 @@ const scannerLockText = readFileSync(
 );
 const scannerPackage = JSON.parse(scannerPackageText);
 const scannerLock = JSON.parse(scannerLockText);
-const packageSha256 = createHash("sha256").update(scannerPackageText).digest("hex");
-const lockSha256 = createHash("sha256").update(scannerLockText).digest("hex");
+const canonicalText = (value: string) => value.replace(/\r\n/gu, "\n");
+const packageSha256 = createHash("sha256").update(canonicalText(scannerPackageText)).digest("hex");
+const lockSha256 = createHash("sha256").update(canonicalText(scannerLockText)).digest("hex");
 
 test("daily Codex Security scan is pinned and defaults to Odinn Forge", () => {
   assert.match(workflow, /--version\)" = "0\.1\.16"/u);
