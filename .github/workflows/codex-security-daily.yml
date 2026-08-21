@@ -111,7 +111,7 @@ jobs:
         run: |
           set -euo pipefail
           test -x "$CODEX_SECURITY_BIN"
-          test "$("$CODEX_SECURITY_BIN" --version)" = "0.1.4"
+          test "$("$CODEX_SECURITY_BIN" --version)" = "0.1.16"
 
       - name: Verify Codex Linux sandbox
         env:
