@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
@@ -6,14 +7,18 @@ const workflow = readFileSync(
   new URL("../.github/workflows/codex-security-daily.yml", import.meta.url),
   "utf8"
 );
-const scannerPackage = JSON.parse(readFileSync(
+const scannerPackageText = readFileSync(
   new URL("../.github/codex-security/package.json", import.meta.url),
   "utf8"
-));
-const scannerLock = JSON.parse(readFileSync(
+);
+const scannerLockText = readFileSync(
   new URL("../.github/codex-security/package-lock.json", import.meta.url),
   "utf8"
-));
+);
+const scannerPackage = JSON.parse(scannerPackageText);
+const scannerLock = JSON.parse(scannerLockText);
+const packageSha256 = createHash("sha256").update(scannerPackageText).digest("hex");
+const lockSha256 = createHash("sha256").update(scannerLockText).digest("hex");
 
 test("daily Codex Security scan is pinned and defaults to Odinn Forge", () => {
   assert.match(workflow, /--version\)" = "0\.1\.16"/u);
@@ -35,9 +40,12 @@ test("scanner installation verifies the complete resolved dependency graph", () 
   assert.equal(scannerLock.packages["node_modules/@openai/codex-security"].version, "0.1.16");
   assert.match(workflow, /repository: BlueDot-IT\/odinn-maintainer[\s\S]*?ref: main/u);
   assert.match(workflow, /cp "\$LOCK_DIR\/package\.json" "\$LOCK_DIR\/package-lock\.json" "\$INSTALL_DIR\/"/u);
+  assert.match(workflow, new RegExp(`EXPECTED_PACKAGE_SHA256: ${packageSha256}`, "u"));
+  assert.match(workflow, new RegExp(`EXPECTED_LOCK_SHA256: ${lockSha256}`, "u"));
+  assert.match(workflow, /sha256sum --check --strict/u);
   assert.match(workflow, /npm ci/u);
   assert.match(workflow, /--ignore-scripts/u);
-  assert.doesNotMatch(workflow, /npm install|--package-lock-only|EXPECTED_LOCK_SHA256/u);
+  assert.doesNotMatch(workflow, /npm install|--package-lock-only/u);
 });
 
 test("reusable callers are restricted to BlueDot and provide explicit secrets", () => {

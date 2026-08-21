@@ -93,11 +93,17 @@ jobs:
         env:
           INSTALL_DIR: ${{ runner.temp }}/codex-security
           LOCK_DIR: ${{ github.workspace }}/codex-security-control-plane/.github/codex-security
+          EXPECTED_PACKAGE_SHA256: 765c031b941ace16d816a3f0d3c9004556f3d67a26b9a446d36bd6b63edae01b
+          EXPECTED_LOCK_SHA256: b7745c09606d5a77bc3fb4b539066e9608a09c3adbc393b84460f9e8ac6320b1
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p "$INSTALL_DIR"
           cp "$LOCK_DIR/package.json" "$LOCK_DIR/package-lock.json" "$INSTALL_DIR/"
+          printf '%s  %s\n' "$EXPECTED_PACKAGE_SHA256" "$INSTALL_DIR/package.json" |
+            sha256sum --check --strict
+          printf '%s  %s\n' "$EXPECTED_LOCK_SHA256" "$INSTALL_DIR/package-lock.json" |
+            sha256sum --check --strict
           npm ci \
             --prefix "$INSTALL_DIR" \
             --ignore-scripts \
