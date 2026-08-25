@@ -31,8 +31,8 @@ test("daily Codex Security scan is pinned and defaults to Odinn Forge", () => {
 });
 
 test("scanner installation verifies the complete resolved dependency graph", () => {
-  assert.equal(scannerPackage.dependencies["@openai/codex-security"], "0.1.4");
-  assert.equal(scannerLock.packages["node_modules/@openai/codex-security"].version, "0.1.4");
+  assert.equal(scannerPackage.dependencies["@openai/codex-security"], "0.1.16");
+  assert.equal(scannerLock.packages["node_modules/@openai/codex-security"].version, "0.1.16");
   assert.match(workflow, /repository: BlueDot-IT\/odinn-maintainer[\s\S]*?ref: main/u);
   assert.match(workflow, /cp "\$LOCK_DIR\/package\.json" "\$LOCK_DIR\/package-lock\.json" "\$INSTALL_DIR\/"/u);
   assert.match(workflow, /npm ci/u);
