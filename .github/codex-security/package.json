@@ -2,6 +2,6 @@
   "name": "odinn-codex-security-install",
   "private": true,
   "dependencies": {
-    "@openai/codex-security": "0.1.4"
+    "@openai/codex-security": "0.1.16"
   }
 }
