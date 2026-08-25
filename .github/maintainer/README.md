@@ -106,19 +106,29 @@ bounded automatic path from a complete Codex Security scan to a draft repair
 pull request. The thin caller remains in Forge while the implementation and
 policy stay in this repository.
 
-The workflow checks out only Forge's trusted default branch without persisted
-Git credentials. Scan and patch steps receive ChatGPT OAuth but never receive
-`GITHUB_TOKEN`. After Codex exits, deterministic gates bind the candidate to
-the scanned default-branch revision, restrict changes to affected files plus
-bounded tests/docs, deny GitHub workflows, scripts, manifests, credentials,
-secrets, deletions, binaries, modes, symlinks, and submodules, and cap both
-file count and diff size. The full Forge check suite must pass before a later
-step receives the caller-scoped write token.
+The workflow accepts only Forge's `main` branch and checks it out without
+persisted Git credentials. It uses three isolated jobs:
 
-The write step rechecks the live default-branch tip, uses finding fingerprints
-and the base revision for deterministic deduplication, opens only a draft pull
-request, and explicitly dispatches Forge CI because events created with
-`GITHUB_TOKEN` do not recursively trigger workflows. It never merges.
+1. `prepare` receives ChatGPT OAuth and read-only repository access. It scans,
+   patches, applies deterministic path/diff bounds, removes the OAuth directory,
+   and uploads a checksummed candidate artifact. The scanner is installed with
+   the dependency manifest and lock from a reviewed immutable maintainer
+   revision, each protected by a checked-in hash.
+2. `validate` receives neither OAuth nor write permissions. It checks out the
+   exact scanned revision, verifies and applies the candidate artifact, then
+   runs the full Forge check suite. Model-generated repository code executes
+   only in this credential-free job.
+3. `publish` receives the caller-scoped write token but no OAuth. It
+   reconstructs the already-validated commit without executing repository code,
+   rechecks the live default-branch tip, and opens only a draft pull request.
+
+The deterministic gates restrict changes to affected files plus bounded
+tests/docs, deny GitHub workflows, scripts, manifests, credentials, secrets,
+deletions, binaries, modes, symlinks, and submodules, and cap both file count
+and diff size. Finding fingerprints and the base revision provide deterministic
+deduplication. Publication explicitly dispatches Forge CI because events
+created with `GITHUB_TOKEN` do not recursively trigger workflows. It never
+merges.
 
 ## Reusable Codex Security scans
 
