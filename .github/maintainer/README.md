@@ -122,6 +122,13 @@ persisted Git credentials. It uses three isolated jobs:
    reconstructs the already-validated commit without executing repository code,
    rechecks the live default-branch tip, and opens only a draft pull request.
 
+Callers may set the reusable workflow's `dry_run` input for controlled
+acceptance with a dedicated non-production OAuth credential. Dry-run mode still
+executes `prepare` and, when findings exist, the credential-free `validate`
+job. It structurally skips the write-capable `publish` job and succeeds only
+when a final permissionless job confirms that publication remained skipped.
+Production publication remains the default when `dry_run` is omitted.
+
 The deterministic gates restrict changes to affected files plus bounded
 tests/docs, deny GitHub workflows, scripts, manifests, credentials, secrets,
 deletions, binaries, modes, symlinks, and submodules, and cap both file count
