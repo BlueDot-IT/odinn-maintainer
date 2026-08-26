@@ -5,7 +5,7 @@ import test from "node:test";
 const workflow = readFileSync(
   new URL("../.github/workflows/codex-security-remediation.yml", import.meta.url),
   "utf8"
-);
+).replaceAll("\r\n", "\n");
 
 test("remediation is caller-scoped to Odinn Forge and never auto-merges", () => {
   assert.match(workflow, /github\.repository == 'BlueDot-IT\/Odinn-Forge'/u);
