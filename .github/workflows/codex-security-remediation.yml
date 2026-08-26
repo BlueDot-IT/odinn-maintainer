@@ -8,6 +8,11 @@ on:
         required: false
         type: string
         default: main
+      dry_run:
+        description: Validate the complete remediation path without publishing a branch or pull request.
+        required: false
+        type: boolean
+        default: false
     secrets:
       oauth_json:
         description: File-backed ChatGPT OAuth record for Codex Security.
@@ -347,7 +352,7 @@ jobs:
   publish:
     name: Publish validated draft pull request
     needs: [prepare, validate]
-    if: needs.prepare.outputs.finding-count != '0' && needs.validate.result == 'success'
+    if: ${{ needs.prepare.outputs.finding-count != '0' && needs.validate.result == 'success' && !inputs.dry_run }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -452,3 +457,45 @@ jobs:
           gh workflow run ci.yml \
             --repo "$GITHUB_REPOSITORY" \
             --ref "$branch"
+
+  confirm-dry-run:
+    name: Confirm controlled dry run
+    needs: [prepare, validate, publish]
+    if: ${{ always() && inputs.dry_run }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    env:
+      PREPARE_RESULT: ${{ needs.prepare.result }}
+      VALIDATE_RESULT: ${{ needs.validate.result }}
+      PUBLISH_RESULT: ${{ needs.publish.result }}
+      FINDING_COUNT: ${{ needs.prepare.outputs.finding-count }}
+      BASE_SHA: ${{ needs.prepare.outputs.base-sha }}
+    steps:
+      - name: Enforce non-publishing acceptance result
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$PREPARE_RESULT" = "success"
+          case "$FINDING_COUNT" in
+            0)
+              test "$VALIDATE_RESULT" = "skipped"
+              ;;
+            ''|*[!0-9]*)
+              echo "The remediation scan did not report a valid finding count." >&2
+              exit 1
+              ;;
+            *)
+              test "$VALIDATE_RESULT" = "success"
+              ;;
+          esac
+          test "$PUBLISH_RESULT" = "skipped"
+
+          {
+            echo "## Controlled remediation dry run"
+            echo
+            echo "- Base revision: $BASE_SHA"
+            echo "- Finding count: $FINDING_COUNT"
+            echo "- Credential-free validation: $VALIDATE_RESULT"
+            echo "- Publication: skipped"
+          } >> "$GITHUB_STEP_SUMMARY"

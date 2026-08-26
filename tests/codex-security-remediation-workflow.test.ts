@@ -5,7 +5,7 @@ import test from "node:test";
 const workflow = readFileSync(
   new URL("../.github/workflows/codex-security-remediation.yml", import.meta.url),
   "utf8"
-);
+).replaceAll("\r\n", "\n");
 
 test("remediation is caller-scoped to Odinn Forge and never auto-merges", () => {
   assert.match(workflow, /github\.repository == 'BlueDot-IT\/Odinn-Forge'/u);
@@ -94,4 +94,31 @@ test("candidate is verified in a dependency job before publication and CI is exp
   assert.match(workflow.slice(publishJob, writeStart), /needs: \[prepare, validate\]/u);
   assert.match(workflow.slice(publishJob, writeStart), /needs\.validate\.result == 'success'/u);
   assert.match(workflow.slice(writeStart), /gh workflow run ci\.yml/u);
+});
+
+test("controlled dry runs validate without entering the write-capable publication job", () => {
+  assert.match(
+    workflow,
+    /dry_run:\s*\n\s+description:[^\n]+\n\s+required: false\n\s+type: boolean\n\s+default: false/u
+  );
+
+  const publishStart = workflow.indexOf("\n  publish:");
+  const confirmStart = workflow.indexOf("\n  confirm-dry-run:");
+  assert.ok(publishStart >= 0);
+  assert.ok(confirmStart > publishStart);
+
+  const publishJob = workflow.slice(publishStart, confirmStart);
+  assert.match(publishJob, /!inputs\.dry_run/u);
+  assert.match(publishJob, /contents: write/u);
+  assert.match(publishJob, /pull-requests: write/u);
+
+  const confirmationJob = workflow.slice(confirmStart);
+  assert.match(confirmationJob, /if: \$\{\{ always\(\) && inputs\.dry_run \}\}/u);
+  assert.match(confirmationJob, /permissions: \{\}/u);
+  assert.match(confirmationJob, /test "\$PUBLISH_RESULT" = "skipped"/u);
+  assert.match(confirmationJob, /test "\$VALIDATE_RESULT" = "success"/u);
+  assert.doesNotMatch(
+    confirmationJob,
+    /oauth_json|CODEX_HOME|GH_TOKEN|contents: write|pull-requests: write/u
+  );
 });
