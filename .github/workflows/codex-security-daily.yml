@@ -84,7 +84,9 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
           repository: BlueDot-IT/odinn-maintainer
-          ref: main
+          # Scanner material is reviewed independently and must remain
+          # immutable in this credential-bearing job.
+          ref: bb1d0a74bc2d5076040af18312bc0a2cfc3a0045
           path: codex-security-control-plane
           persist-credentials: false
           sparse-checkout: .github/codex-security

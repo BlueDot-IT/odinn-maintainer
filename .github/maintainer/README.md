@@ -112,8 +112,8 @@ persisted Git credentials. It uses three isolated jobs:
 1. `prepare` receives ChatGPT OAuth and read-only repository access. It scans,
    patches, applies deterministic path/diff bounds, removes the OAuth directory,
    and uploads a checksummed candidate artifact. The scanner is installed with
-   the committed dependency manifest and lock, each protected by a checked-in
-   hash.
+   the dependency manifest and lock from a reviewed immutable maintainer
+   revision, each protected by a checked-in hash.
 2. `validate` receives neither OAuth nor write permissions. It checks out the
    exact scanned revision, verifies and applies the candidate artifact, then
    runs the full Forge check suite. Model-generated repository code executes
@@ -121,6 +121,13 @@ persisted Git credentials. It uses three isolated jobs:
 3. `publish` receives the caller-scoped write token but no OAuth. It
    reconstructs the already-validated commit without executing repository code,
    rechecks the live default-branch tip, and opens only a draft pull request.
+
+Callers may set the reusable workflow's `dry_run` input for controlled
+acceptance with a dedicated non-production OAuth credential. Dry-run mode still
+executes `prepare` and, when findings exist, the credential-free `validate`
+job. It structurally skips the write-capable `publish` job and succeeds only
+when a final permissionless job confirms that publication remained skipped.
+Production publication remains the default when `dry_run` is omitted.
 
 The deterministic gates restrict changes to affected files plus bounded
 tests/docs, deny GitHub workflows, scripts, manifests, credentials, secrets,
