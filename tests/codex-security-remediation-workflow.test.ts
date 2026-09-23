@@ -29,8 +29,8 @@ test("scanner installation verifies the committed resolved dependency graph", ()
     /repository: BlueDot-IT\/odinn-maintainer(?:\n\s+#.*)*\n\s+ref: (?:main|master|HEAD)\b/u
   );
   assert.match(workflow, /cp "\$LOCK_DIR\/package\.json" "\$LOCK_DIR\/package-lock\.json" "\$INSTALL_DIR\/"/u);
-  assert.match(workflow, /EXPECTED_PACKAGE_SHA256: 765c031b941ace16d816a3f0d3c9004556f3d67a26b9a446d36bd6b63edae01b/u);
-  assert.match(workflow, /EXPECTED_LOCK_SHA256: b7745c09606d5a77bc3fb4b539066e9608a09c3adbc393b84460f9e8ac6320b1/u);
+  assert.match(workflow, /EXPECTED_PACKAGE_SHA256: b729ae0cef47c5b8c920b79011164a9c119601140c525618035e39796d6e9376/u);
+  assert.match(workflow, /EXPECTED_LOCK_SHA256: dcd50870e27665ce4b2a4e5aa07b976d75cf0e97863275d75fe3a464654f2e5d/u);
   assert.match(workflow, /sha256sum --check --strict/u);
   assert.match(workflow, /npm ci/u);
   assert.match(workflow, /--ignore-scripts/u);
