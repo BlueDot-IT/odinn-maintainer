@@ -70,7 +70,7 @@ jobs:
           # The OAuth-bearing job must not resolve scanner code or lock data
           # through a mutable branch. This revision contains the reviewed
           # package manifest and lock hashes below.
-          ref: bb1d0a74bc2d5076040af18312bc0a2cfc3a0045
+          ref: b7a083114fc7c68d3689c3933f916a2439139166
           path: codex-security-control-plane
           persist-credentials: false
           sparse-checkout: .github/codex-security

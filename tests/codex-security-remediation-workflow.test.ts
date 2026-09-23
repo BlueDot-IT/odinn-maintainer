@@ -16,7 +16,7 @@ test("remediation is caller-scoped to Odinn Forge and never auto-merges", () => 
 });
 
 test("scanner installation verifies the committed resolved dependency graph", () => {
-  const scannerMaterialRevision = "bb1d0a74bc2d5076040af18312bc0a2cfc3a0045";
+  const scannerMaterialRevision = "b7a083114fc7c68d3689c3933f916a2439139166";
   assert.match(
     workflow,
     new RegExp(
