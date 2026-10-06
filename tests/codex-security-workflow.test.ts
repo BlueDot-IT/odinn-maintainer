@@ -22,7 +22,7 @@ const packageSha256 = createHash("sha256").update(canonicalText(scannerPackageTe
 const lockSha256 = createHash("sha256").update(canonicalText(scannerLockText)).digest("hex");
 
 test("daily Codex Security scan is pinned and defaults to Odinn Forge", () => {
-  assert.match(workflow, /--version\)" = "0\.1\.16"/u);
+  assert.match(workflow, /--version\)" = "0\.1\.30"/u);
   assert.match(
     workflow,
     /TARGET_REPOSITORY: \$\{\{ inputs\.target_repository \|\| 'BlueDot-IT\/Odinn-Forge' \}\}/u
@@ -37,9 +37,9 @@ test("daily Codex Security scan is pinned and defaults to Odinn Forge", () => {
 });
 
 test("scanner installation verifies the complete resolved dependency graph", () => {
-  const scannerMaterialRevision = "bb1d0a74bc2d5076040af18312bc0a2cfc3a0045";
-  assert.equal(scannerPackage.dependencies["@openai/codex-security"], "0.1.16");
-  assert.equal(scannerLock.packages["node_modules/@openai/codex-security"].version, "0.1.16");
+  const scannerMaterialRevision = "b7a083114fc7c68d3689c3933f916a2439139166";
+  assert.equal(scannerPackage.dependencies["@openai/codex-security"], "0.1.30");
+  assert.equal(scannerLock.packages["node_modules/@openai/codex-security"].version, "0.1.30");
   assert.match(
     workflow,
     new RegExp(
