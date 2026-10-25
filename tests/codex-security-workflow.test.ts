@@ -37,9 +37,15 @@ test("daily Codex Security scan is pinned and defaults to Odinn Forge", () => {
 });
 
 test("scanner installation verifies the complete resolved dependency graph", () => {
-  const scannerMaterialRevision = "b7a083114fc7c68d3689c3933f916a2439139166";
+  const scannerMaterialRevision = "e9ff704b490784234cca9f118308626bc9b38294";
   assert.equal(scannerPackage.dependencies["@openai/codex-security"], "0.1.30");
   assert.equal(scannerLock.packages["node_modules/@openai/codex-security"].version, "0.1.30");
+  assert.equal(scannerPackage.overrides.zod, "4.6.6");
+  const zodPackages = Object.entries(scannerLock.packages).filter(([path]) => path.endsWith("node_modules/zod"));
+  assert.ok(zodPackages.length > 0);
+  for (const [, dependency] of zodPackages) {
+    assert.equal((dependency as { version: string }).version, "4.6.6");
+  }
   assert.match(
     workflow,
     new RegExp(
