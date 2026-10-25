@@ -3,5 +3,8 @@
   "private": true,
   "dependencies": {
     "@openai/codex-security": "0.1.30"
+  },
+  "overrides": {
+    "zod": "4.6.6"
   }
 }

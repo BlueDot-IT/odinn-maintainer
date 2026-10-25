@@ -16,7 +16,7 @@ test("remediation is caller-scoped to Odinn Forge and never auto-merges", () => 
 });
 
 test("scanner installation verifies the committed resolved dependency graph", () => {
-  const scannerMaterialRevision = "b7a083114fc7c68d3689c3933f916a2439139166";
+  const scannerMaterialRevision = "e9ff704b490784234cca9f118308626bc9b38294";
   assert.match(
     workflow,
     new RegExp(
@@ -29,8 +29,8 @@ test("scanner installation verifies the committed resolved dependency graph", ()
     /repository: BlueDot-IT\/odinn-maintainer(?:\n\s+#.*)*\n\s+ref: (?:main|master|HEAD)\b/u
   );
   assert.match(workflow, /cp "\$LOCK_DIR\/package\.json" "\$LOCK_DIR\/package-lock\.json" "\$INSTALL_DIR\/"/u);
-  assert.match(workflow, /EXPECTED_PACKAGE_SHA256: b729ae0cef47c5b8c920b79011164a9c119601140c525618035e39796d6e9376/u);
-  assert.match(workflow, /EXPECTED_LOCK_SHA256: dcd50870e27665ce4b2a4e5aa07b976d75cf0e97863275d75fe3a464654f2e5d/u);
+  assert.match(workflow, /EXPECTED_PACKAGE_SHA256: 76734eb90ab85f0ac4f098a5280961a9c367b8fd5284531b5a3580b3c76bf750/u);
+  assert.match(workflow, /EXPECTED_LOCK_SHA256: 55563275307b1186ca08cad4d71749926dcb8f7940b6a1c1240b1a8c03d70ade/u);
   assert.match(workflow, /sha256sum --check --strict/u);
   assert.match(workflow, /npm ci/u);
   assert.match(workflow, /--ignore-scripts/u);
